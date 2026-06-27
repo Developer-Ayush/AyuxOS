@@ -3,6 +3,7 @@ set -e
 
 BUILD_DIR=$1
 REPO_ROOT=$2
+TARGET_ARCH="x86_64-unknown-linux-musl"
 
 ROOTFS_DIR="${BUILD_DIR}/rootfs"
 
@@ -13,16 +14,19 @@ mkdir -p "${ROOTFS_DIR}"
 cd "${ROOTFS_DIR}"
 
 # Create directory structure
-mkdir -p bin sbin etc proc sys dev run tmp root home var/log
+mkdir -p bin sbin etc proc sys dev run tmp root home var/log main users
 mkdir -p usr/bin usr/sbin
 
 # Copy binaries
-cp "${REPO_ROOT}/target/release/ayux_init" ./init
-cp "${REPO_ROOT}/target/release/login_manager" ./bin/
-cp "${REPO_ROOT}/target/release/ayux_shell" ./bin/
-cp "${REPO_ROOT}/target/release/auth_service" ./bin/
-cp "${REPO_ROOT}/target/release/session_manager" ./bin/
-cp "${REPO_ROOT}/target/release/security_manager" ./bin/
+cp "${REPO_ROOT}/target/${TARGET_ARCH}/release/ayux_init" ./init
+cp "${REPO_ROOT}/target/${TARGET_ARCH}/release/login_manager" ./bin/
+cp "${REPO_ROOT}/target/${TARGET_ARCH}/release/ayux_shell" ./bin/
+cp "${REPO_ROOT}/target/${TARGET_ARCH}/release/auth_service" ./bin/
+cp "${REPO_ROOT}/target/${TARGET_ARCH}/release/session_manager" ./bin/
+cp "${REPO_ROOT}/target/${TARGET_ARCH}/release/security_manager" ./bin/
+
+# Ensure init is executable
+chmod +x ./init
 
 # Create some basic files
 # Milestone 2 uses its own auth database, but we keep etc/passwd for compatibility if needed
