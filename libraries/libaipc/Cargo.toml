@@ -5,3 +5,5 @@ edition = "2024"
 
 [dependencies]
 nix = { version = "0.31.3", features = ["net"] }
+serde = { version = "1.0", features = ["derive"] }
+bincode = "1.3"

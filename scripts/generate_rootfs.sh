@@ -20,13 +20,16 @@ mkdir -p usr/bin usr/sbin
 cp "${REPO_ROOT}/target/release/ayux_init" ./init
 cp "${REPO_ROOT}/target/release/login_manager" ./bin/
 cp "${REPO_ROOT}/target/release/ayux_shell" ./bin/
+cp "${REPO_ROOT}/target/release/auth_service" ./bin/
+cp "${REPO_ROOT}/target/release/session_manager" ./bin/
+cp "${REPO_ROOT}/target/release/security_manager" ./bin/
 
 # Create some basic files
+# Milestone 2 uses its own auth database, but we keep etc/passwd for compatibility if needed
 echo "root:x:0:0:root:/root:/bin/ayux_shell" > etc/passwd
-echo "ayux:x:1000:1000:ayux:/home/ayux:/bin/ayux_shell" >> etc/passwd
 
 # Create a simple welcome message
-echo "Welcome to AyuxOS Milestone 1" > etc/motd
+echo "Welcome to AyuxOS Milestone 2 - Security & Isolation" > etc/motd
 
 # Pack initramfs
 echo "Packing initramfs..."
