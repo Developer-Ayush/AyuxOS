@@ -24,6 +24,7 @@ cd "linux-${KERNEL_VERSION}"
 
 echo "Applying AyuxOS defconfig..."
 cp "${DEFCONFIG_PATH}" .config
+make ARCH=x86_64 olddefconfig
 
 echo "Building kernel..."
-make -j$(nproc) bzImage
+make ARCH=x86_64 -j$(nproc) bzImage
