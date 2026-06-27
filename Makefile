@@ -9,7 +9,8 @@ KERNEL_DIR = $(BUILD_DIR)/linux-$(KERNEL_VERSION)
 KERNEL_IMAGE = $(KERNEL_DIR)/arch/x86_64/boot/bzImage
 
 CARGO = cargo
-CARGO_OPTS = --release
+TARGET = x86_64-unknown-linux-musl
+CARGO_OPTS = --release --target $(TARGET)
 
 all: kernel initramfs
 
@@ -26,6 +27,7 @@ $(KERNEL_IMAGE): $(BUILD_DIR)
 initramfs: $(BUILD_DIR)
 	$(CARGO) build $(CARGO_OPTS)
 	./scripts/generate_rootfs.sh $(BUILD_DIR) $(CURDIR)
+	./scripts/verify_initramfs.sh $(BUILD_DIR)/initramfs.cpio.gz
 
 clean:
 	rm -rf $(BUILD_DIR)
