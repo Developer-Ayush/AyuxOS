@@ -1,0 +1,9 @@
+[workspace]
+members = [
+    "init",
+    "system_apps/login_manager",
+    "system_apps/ayux_shell",
+    "libraries/libayux",
+    "libraries/libaipc",
+]
+resolver = "2"
