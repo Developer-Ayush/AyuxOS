@@ -17,6 +17,10 @@ pub fn mount_basic_filesystems() -> io::Result<()> {
     mount_fs("tmpfs", "/run", "tmpfs", MsFlags::MS_NOSUID | MsFlags::MS_NODEV)?;
     mount_fs("tmpfs", "/tmp", "tmpfs", MsFlags::MS_NOSUID | MsFlags::MS_NODEV)?;
 
+    fs::create_dir_all("/main")?;
+    fs::create_dir_all("/root")?;
+    fs::create_dir_all("/users")?;
+
     Ok(())
 }
 

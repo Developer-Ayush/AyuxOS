@@ -1,0 +1,9 @@
+[package]
+name = "security_manager"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+libaipc = { path = "../../libraries/libaipc" }
+serde = { version = "1.0", features = ["derive"] }
+nix = { version = "0.31.3", features = ["fs", "user"] }

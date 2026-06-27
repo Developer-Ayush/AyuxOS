@@ -1,12 +1,13 @@
 use std::io::{self, Write};
-use std::process::Command;
 use termion::input::TermRead;
-use std::fs::File;
-use std::io::BufRead;
+use libaipc::{AipcClient, AipcMessage, AuthRequest, AuthResponse, SessionRequest, SessionResponse};
+
+const AUTH_SOCKET_PATH: &str = "/run/auth.sock";
+const SESSION_SOCKET_PATH: &str = "/run/session.sock";
 
 fn main() {
     loop {
-        println!("\nAyuxOS Login");
+        println!("\nAyuxOS Login (Milestone 2)");
         print!("Username: ");
         io::stdout().flush().unwrap();
 
@@ -24,61 +25,52 @@ fn main() {
         let password = io::stdin().read_passwd(&mut io::stdout()).unwrap().unwrap_or_default();
         println!();
 
-        if authenticate(username, &password) {
-            println!("Welcome to AyuxOS, {}!", username);
-            run_shell(username);
-        } else {
-            println!("Login incorrect");
-        }
-    }
-}
-
-fn authenticate(username: &str, _password: &str) -> bool {
-    // For Milestone 1, we check if the user exists in /etc/passwd
-    // We still don't have a secure password hash mechanism, so we accept any password for valid users
-    // This is a step up from "accept anything" but still minimal.
-
-    let file = match File::open("/etc/passwd") {
-        Ok(f) => f,
-        Err(_) => return username == "root", // Fallback for early boot/missing file
-    };
-
-    let reader = io::BufReader::new(file);
-    for line in reader.lines() {
-        if let Ok(line) = line {
-            let parts: Vec<&str> = line.split(':').collect();
-            if !parts.is_empty() && parts[0] == username {
-                return true;
+        match authenticate(username, &password) {
+            Ok((uid, uname)) => {
+                println!("Welcome to AyuxOS, {}!", uname);
+                if let Err(e) = create_session(uid, &uname) {
+                    println!("Failed to create session: {}", e);
+                }
+            },
+            Err(e) => {
+                println!("Login incorrect: {}", e);
             }
         }
     }
-
-    false
 }
 
-fn run_shell(username: &str) {
-    let mut child = Command::new("/bin/ayux_shell")
-        .env("USER", username)
-        .spawn()
-        .expect("Failed to start shell");
+fn authenticate(username: &str, password: &str) -> Result<(u32, String), String> {
+    let mut client = AipcClient::connect(AUTH_SOCKET_PATH)
+        .map_err(|e| format!("Failed to connect to auth service: {}", e))?;
 
-    let _ = child.wait();
+    client.send_message(&AipcMessage::Auth(AuthRequest::Login {
+        username: username.to_string(),
+        password: password.to_string(),
+    })).map_err(|e| format!("Failed to send auth request: {}", e))?;
+
+    match client.receive_message() {
+        Ok(AipcMessage::AuthRes(AuthResponse::Authenticated { uid, username })) => Ok((uid, username)),
+        Ok(AipcMessage::AuthRes(AuthResponse::Error(e))) => Err(e),
+        _ => Err("Received unexpected response from auth service".to_string()),
+    }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use std::io::Write;
-    use tempfile::NamedTempFile;
+fn create_session(uid: u32, username: &str) -> Result<(), String> {
+    let mut client = AipcClient::connect(SESSION_SOCKET_PATH)
+        .map_err(|e| format!("Failed to connect to session manager: {}", e))?;
 
-    #[test]
-    fn test_authenticate_with_file() {
-        let mut tmpfile = NamedTempFile::new().unwrap();
-        writeln!(tmpfile, "root:x:0:0:root:/root:/bin/ayux_shell").unwrap();
-        writeln!(tmpfile, "ayux:x:1000:1000:ayux:/home/ayux:/bin/ayux_shell").unwrap();
+    client.send_message(&AipcMessage::Session(SessionRequest::CreateSession {
+        uid,
+        username: username.to_string(),
+    })).map_err(|e| format!("Failed to send session request: {}", e))?;
 
-        // This is a bit tricky to test because authenticate() is hardcoded to /etc/passwd
-        // But for Milestone 1, we can at least verify it returns false for non-existent users
-        assert!(!authenticate("nonexistent", "password"));
+    match client.receive_message() {
+        Ok(AipcMessage::SessionRes(SessionResponse::Success { token: _ })) => {
+            // In Milestone 2, the Session Manager launches the shell.
+            // The Login Manager doesn't need to do anything else.
+            Ok(())
+        },
+        Ok(AipcMessage::SessionRes(SessionResponse::Error(e))) => Err(e),
+        _ => Err("Received unexpected response from session manager".to_string()),
     }
 }
