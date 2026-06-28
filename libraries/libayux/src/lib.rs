@@ -67,11 +67,21 @@ pub fn mount_basic_filesystems() -> io::Result<()> {
         MsFlags::MS_NOSUID | MsFlags::MS_NODEV,
     )?;
 
-    fs::create_dir_all("/main")?;
+    fs::create_dir_all("/ayux")?;
     fs::create_dir_all("/root")?;
     fs::create_dir_all("/users")?;
 
     Ok(())
+}
+
+pub fn hmac_sha256(key: &[u8], data: &[u8]) -> [u8; 32] {
+    hmac_sha256::HMAC::mac(data, key)
+}
+
+pub fn generate_random_bytes(len: usize) -> Vec<u8> {
+    let mut buf = vec![0u8; len];
+    getrandom::getrandom(&mut buf).expect("Failed to generate random bytes");
+    buf
 }
 
 fn mount_fs(source: &str, target: &str, fstype: &str, flags: MsFlags) -> io::Result<()> {

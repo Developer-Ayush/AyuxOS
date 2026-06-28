@@ -16,8 +16,9 @@ const SESSION_SOCKET_PATH: &str = "/run/session.sock";
 struct Session {
     #[allow(dead_code)]
     token: String,
-    uid: u32,
+    internal_id: String,
     username: String,
+    display_name: String,
     role: String,
     capabilities: Vec<String>,
     child_pid: Option<u32>,
@@ -36,8 +37,9 @@ impl SessionManager {
 
     fn create_session(
         &mut self,
-        uid: u32,
+        internal_id: String,
         username: String,
+        display_name: String,
         role: String,
         capabilities: Vec<String>,
     ) -> SessionResponse {
@@ -45,15 +47,16 @@ impl SessionManager {
 
         let mut session = Session {
             token: token.clone(),
-            uid,
+            internal_id: internal_id.clone(),
             username: username.clone(),
+            display_name: display_name.clone(),
             role,
             capabilities,
             child_pid: None,
         };
 
         // Start user shell in background
-        match self.launch_user_shell(&token, &username) {
+        match self.launch_user_shell(&token, &username, &display_name, &internal_id) {
             Ok(pid) => {
                 session.child_pid = Some(pid);
                 self.sessions.insert(token.clone(), session);
@@ -63,16 +66,20 @@ impl SessionManager {
         }
     }
 
-    fn launch_user_shell(&self, token: &str, username: &str) -> std::io::Result<u32> {
+    fn launch_user_shell(&self, token: &str, username: &str, display_name: &str, internal_id: &str) -> std::io::Result<u32> {
         use nix::sched::{CloneFlags, unshare};
         use nix::unistd::setsid;
         use std::os::unix::process::CommandExt;
 
         let username = username.to_string();
+        let display_name = display_name.to_string();
+        let internal_id = internal_id.to_string();
 
         unsafe {
             let child = Command::new("/bin/ayux_shell")
                 .env("USER", &username)
+                .env("DISPLAY_NAME", &display_name)
+                .env("AYUX_INTERNAL_ID", &internal_id)
                 .env("AYUX_SESSION_TOKEN", token)
                 .stdin(Stdio::inherit())
                 .stdout(Stdio::inherit())
@@ -114,8 +121,9 @@ impl SessionManager {
     fn validate_session(&self, token: String) -> SessionResponse {
         if let Some(session) = self.sessions.get(&token) {
             SessionResponse::Valid {
-                uid: session.uid,
+                internal_id: session.internal_id.clone(),
                 username: session.username.clone(),
+                display_name: session.display_name.clone(),
                 role: session.role.clone(),
                 capabilities: session.capabilities.clone(),
             }
@@ -127,11 +135,12 @@ impl SessionManager {
     fn handle_request(&mut self, request: SessionRequest) -> SessionResponse {
         match request {
             SessionRequest::CreateSession {
-                uid,
+                internal_id,
                 username,
+                display_name,
                 role,
                 capabilities,
-            } => self.create_session(uid, username, role, capabilities),
+            } => self.create_session(internal_id, username, display_name, role, capabilities),
             SessionRequest::DestroySession { token } => self.destroy_session(token),
             SessionRequest::ValidateSession { token } => self.validate_session(token),
         }

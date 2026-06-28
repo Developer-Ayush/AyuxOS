@@ -25,15 +25,17 @@ AyuxOS follows a layered architecture with strict boundary enforcement:
 ## 3. Security Model
 
 ### 3.1. Entity Hierarchy
--   **The System**: The trusted core. Owns the kernel, base OS, and system apps. Immutable at runtime.
--   **Root**: Restricted administrator. Manages users and updates. Cannot access user data or modify the system core.
--   **User**: Individual account with a fully isolated sandbox. Complete control within the sandbox, zero access outside.
+-   **The System**: The trusted core. Owns the kernel, base OS, and system apps. Immutable at runtime. Located at `/ayux`.
+-   **Administrator**: Restricted system manager. Can manage users, updates, and hardware. Cannot access user data or modify the `/ayux` core. Workspace at `/root`.
+-   **User**: Individual account with a fully isolated sandbox. Complete control within the sandbox, zero access outside. Home directory at `/users/<internal-uuid>`.
 
 ### 3.2. Security Mechanisms
 -   **Verified Boot**: Uses `dm-verity` to ensure integrity of the system partition. Digital signatures are verified at every stage.
--   **File-Based Encryption (FBE)**: Each user's data is encrypted using `fscrypt` with a key derived from their credentials.
+-   **Identity Privacy**: User IDs are never stored in plaintext. They are hashed using HMAC-SHA256 with a unique system secret.
+-   **Internal Identifiers**: All internal system references use cryptographically random UUIDs rather than User IDs.
+-   **File-Based Encryption (FBE)**: Each user's data is intended to be encrypted using `fscrypt` with a key derived from their credentials.
 -   **Sandboxing**: Uses Linux namespaces (PID, Mount, Network, UTS, IPC) and Cgroups to isolate user processes.
--   **Mandatory Access Control (MAC)**: AyuxOS custom policy enforced via kernel primitives to protect boundaries.
+-   **Mandatory Access Control (MAC)**: AyuxOS custom policy enforced via the Security Manager to protect boundaries.
 
 ## 4. Subsystems
 
@@ -60,12 +62,10 @@ Custom mobile-optimized compositor.
 -   Ensures OS portability across different kernel versions and hardware.
 
 ## 5. Filesystem Layout (Runtime)
--   `/main/`: Immutable system components (Kernel, Base OS, Libraries).
--   `/root/`: Device administrator configuration and logs.
+-   `/ayux/`: Immutable system components (Kernel, Base OS, Libraries, Security Secret). Read-only during normal operation.
+-   `/root/`: Device administrator workspace (documents, logs, recovery info). Isolated from users.
 -   `/users/`: Encrypted user sandboxes.
-    -   `/users/<username>/apps/`: User-installed applications.
-    -   `/users/<username>/data/`: Private user data.
-    -   `/users/<username>/logs/`: User-specific logs.
+    -   `/users/<internal-uuid>/`: Private user data. The mapping between User ID and UUID is internal.
 
 ## 6. Compatibility Strategy
 Modular translation layers:

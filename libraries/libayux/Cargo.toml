@@ -7,3 +7,5 @@ edition = "2024"
 libc = "0.2.186"
 nix = { version = "0.31.3", features = ["mount"] }
 libaipc = { path = "../libaipc" }
+hmac-sha256 = "1.1"
+getrandom = "0.2"

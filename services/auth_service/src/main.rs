@@ -7,19 +7,33 @@ use libaipc::{
     AIPC_VERSION, AipcClient, AipcEnvelope, AipcHeader, AipcMessage, AuthRequest, AuthResponse,
     MessageType, create_listener,
 };
-use libayux::ayux_log;
+use libayux::{ayux_log, generate_random_bytes, hmac_sha256};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs::{self, File};
 use std::io::{self, Read, Write};
 use std::path::Path;
+use uuid::Uuid;
 
 const AUTH_DB_PATH: &str = "/root/auth/users.db";
 const AUTH_SOCKET_PATH: &str = "/run/auth.sock";
 const SESSION_SOCKET_PATH: &str = "/run/session.sock";
+const SYSTEM_SECRET_PATH: &str = "/ayux/security/system_secret";
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
 struct UserRecord {
+    internal_id: String,
+    userid_hash: String, // hex encoded HMAC(system_secret, username)
+    display_name: String,
+    password_hash: String,
+    role: String,
+    capabilities: Vec<String>,
+    state: String, // "active", "pending_deletion"
+}
+
+// For migration only
+#[derive(Serialize, Deserialize, Clone, Debug)]
+struct LegacyUserRecord {
     username: String,
     display_name: String,
     uid: u32,
@@ -32,16 +46,35 @@ struct UserRecord {
 }
 
 struct AuthService {
-    users: HashMap<String, UserRecord>,
+    users: HashMap<String, UserRecord>, // Key is userid_hash
+    system_secret: [u8; 32],
 }
 
 impl AuthService {
     fn new() -> Self {
+        let secret = Self::load_or_generate_secret();
         let mut service = Self {
             users: HashMap::new(),
+            system_secret: secret,
         };
         service.load_db();
         service
+    }
+
+    fn load_or_generate_secret() -> [u8; 32] {
+        if Path::new(SYSTEM_SECRET_PATH).exists() {
+            let mut file = File::open(SYSTEM_SECRET_PATH).expect("Failed to open system secret");
+            let mut buf = [0u8; 32];
+            file.read_exact(&mut buf).expect("Failed to read system secret");
+            buf
+        } else {
+            let parent = Path::new(SYSTEM_SECRET_PATH).parent().unwrap();
+            fs::create_dir_all(parent).expect("Failed to create security dir");
+            let secret = generate_random_bytes(32);
+            let mut file = File::create(SYSTEM_SECRET_PATH).expect("Failed to create system secret");
+            file.write_all(&secret).expect("Failed to write system secret");
+            secret.try_into().unwrap()
+        }
     }
 
     fn load_db(&mut self) {
@@ -50,7 +83,19 @@ impl AuthService {
                 Ok(mut file) => {
                     let mut content = String::new();
                     if let Ok(_size) = file.read_to_string(&mut content) {
-                        self.users = serde_json::from_str(&content).unwrap_or_default();
+                        // Try parsing new format first
+                        match serde_json::from_str::<HashMap<String, UserRecord>>(&content) {
+                            Ok(users) => self.users = users,
+                            Err(_) => {
+                                // Try legacy format
+                                if let Ok(legacy_users) = serde_json::from_str::<HashMap<String, LegacyUserRecord>>(&content) {
+                                    ayux_log(LogLevel::Info, "auth_service", "Migrating legacy user database...");
+                                    self.migrate_db(legacy_users);
+                                } else {
+                                    ayux_log(LogLevel::Error, "auth_service", "Failed to parse auth db (unknown format)");
+                                }
+                            }
+                        }
                     } else {
                         ayux_log(LogLevel::Error, "auth_service", "Failed to read auth db");
                     }
@@ -64,6 +109,36 @@ impl AuthService {
                 }
             }
         }
+    }
+
+    fn migrate_db(&mut self, legacy_users: HashMap<String, LegacyUserRecord>) {
+        for (username, legacy) in legacy_users {
+            let internal_id = Uuid::new_v4().to_string();
+            let userid_hash = hex::encode(hmac_sha256(&self.system_secret, username.as_bytes()));
+
+            let new_record = UserRecord {
+                internal_id: internal_id.clone(),
+                userid_hash: userid_hash.clone(),
+                display_name: legacy.display_name,
+                password_hash: legacy.password_hash,
+                role: legacy.role,
+                capabilities: legacy.capabilities,
+                state: legacy.state,
+            };
+
+            // Migrate home directory
+            let old_home = format!("/users/{}", username);
+            let new_home = format!("/users/{}", internal_id);
+            if Path::new(&old_home).exists() {
+                if let Err(e) = fs::rename(&old_home, &new_home) {
+                    ayux_log(LogLevel::Error, "auth_service", &format!("Failed to migrate home dir for {}: {}", username, e));
+                }
+            }
+
+            self.users.insert(userid_hash, new_record);
+        }
+        self.save_db();
+        ayux_log(LogLevel::Info, "auth_service", "Migration complete.");
     }
 
     fn save_db(&self) {
@@ -110,7 +185,7 @@ impl AuthService {
         }
     }
 
-    fn validate_root_token(&self, token: &str) -> bool {
+    fn validate_admin_token(&self, token: &str) -> bool {
         use libaipc::SessionRequest;
         let mut client = match AipcClient::connect(SESSION_SOCKET_PATH) {
             Ok(c) => c,
@@ -125,8 +200,8 @@ impl AuthService {
             }),
         );
         match res {
-            Ok(AipcMessage::SessionRes(libaipc::SessionResponse::Valid { username, .. })) => {
-                username == "root"
+            Ok(AipcMessage::SessionRes(libaipc::SessionResponse::Valid { role, .. })) => {
+                role == "Administrator"
             }
             _ => false,
         }
@@ -135,14 +210,12 @@ impl AuthService {
     fn handle_request(&mut self, request: AuthRequest, header: &AipcHeader) -> AuthResponse {
         match request {
             AuthRequest::Login { username, password } => {
-                if let Some(user) = self.users.get(&username) {
-                    if user.state != "active" {
-                        return AuthResponse::Error("Account is not active".to_string());
-                    }
+                let userid_hash = hex::encode(hmac_sha256(&self.system_secret, username.as_bytes()));
+                if let Some(user) = self.users.get(&userid_hash) {
                     let parsed_hash = match PasswordHash::new(&user.password_hash) {
                         Ok(h) => h,
                         Err(_) => {
-                            return AuthResponse::Error("Invalid password hash in DB".to_string());
+                            return AuthResponse::Error("Authentication failed.".to_string());
                         }
                     };
                     if Argon2::default()
@@ -150,16 +223,18 @@ impl AuthService {
                         .is_ok()
                     {
                         AuthResponse::Authenticated {
-                            uid: user.uid,
-                            username: user.username.clone(),
+                            internal_id: user.internal_id.clone(),
+                            username, // Only in memory, returned to the caller
+                            display_name: user.display_name.clone(),
                             role: user.role.clone(),
                             capabilities: user.capabilities.clone(),
                         }
                     } else {
-                        AuthResponse::Error("Invalid password.".to_string())
+                        AuthResponse::Error("Authentication failed.".to_string())
                     }
                 } else {
-                    AuthResponse::Error("Unknown username.".to_string())
+                    // Constant time-ish delay could be added here
+                    AuthResponse::Error("Authentication failed.".to_string())
                 }
             }
             AuthRequest::ChangePassword {
@@ -167,11 +242,12 @@ impl AuthService {
                 old_password,
                 new_password,
             } => {
-                if let Some(user) = self.users.get_mut(&username) {
+                let userid_hash = hex::encode(hmac_sha256(&self.system_secret, username.as_bytes()));
+                if let Some(user) = self.users.get_mut(&userid_hash) {
                     let parsed_hash = match PasswordHash::new(&user.password_hash) {
                         Ok(h) => h,
                         Err(_) => {
-                            return AuthResponse::Error("Invalid password hash in DB".to_string());
+                            return AuthResponse::Error("Authentication failed.".to_string());
                         }
                     };
                     if Argon2::default()
@@ -186,10 +262,10 @@ impl AuthService {
                         self.save_db();
                         AuthResponse::Success
                     } else {
-                        AuthResponse::Error("Invalid old password".to_string())
+                        AuthResponse::Error("Authentication failed.".to_string())
                     }
                 } else {
-                    AuthResponse::Error("User not found".to_string())
+                    AuthResponse::Error("Authentication failed.".to_string())
                 }
             }
             AuthRequest::CreateUser {
@@ -204,8 +280,8 @@ impl AuthService {
                         Some(t) => t,
                         None => return AuthResponse::Error("Missing session token".to_string()),
                     };
-                    if !self.validate_root_token(token) {
-                        return AuthResponse::Error("Permission denied: Root only".to_string());
+                    if !self.validate_admin_token(token) {
+                        return AuthResponse::Error("Permission denied: Administrator only".to_string());
                     }
                 }
 
@@ -213,15 +289,10 @@ impl AuthService {
                     return AuthResponse::Error(e);
                 }
 
-                if self.users.contains_key(&username) {
+                let userid_hash = hex::encode(hmac_sha256(&self.system_secret, username.as_bytes()));
+                if self.users.contains_key(&userid_hash) {
                     return AuthResponse::Error("User already exists".to_string());
                 }
-
-                let uid = if self.users.is_empty() {
-                    1000
-                } else {
-                    (self.users.values().map(|u| u.uid).max().unwrap_or(1000) + 1).max(1001)
-                };
 
                 let salt = SaltString::generate(&mut OsRng);
                 let password_hash =
@@ -232,7 +303,7 @@ impl AuthService {
                         }
                     };
 
-                let home_dir = format!("/users/{}", username);
+                let internal_id = Uuid::new_v4().to_string();
                 let capabilities = if role == "Administrator" {
                     vec![
                         "FsRead".to_string(),
@@ -247,18 +318,16 @@ impl AuthService {
                 };
 
                 let user = UserRecord {
-                    username: username.clone(),
+                    internal_id: internal_id.clone(),
+                    userid_hash: userid_hash.clone(),
                     display_name,
-                    uid,
                     password_hash,
-                    home_dir: home_dir.clone(),
-                    shell: "/bin/ayux_shell".to_string(),
                     role,
                     capabilities,
                     state: "active".to_string(),
                 };
 
-                // Create home directory and default subdirectories
+                let home_dir = format!("/users/{}", internal_id);
                 if let Err(e) = self.create_home_dir(&home_dir) {
                     return AuthResponse::Error(format!("Failed to create home directory: {}", e));
                 }
@@ -266,23 +335,93 @@ impl AuthService {
                 ayux_log(
                     LogLevel::Info,
                     "auth_service",
-                    &format!("User created: {}", username),
+                    "New user account created successfully.",
                 );
-                self.users.insert(username, user);
+                self.users.insert(userid_hash, user);
                 self.save_db();
                 AuthResponse::Success
             }
-            AuthRequest::DeleteUser { username } => {
+            AuthRequest::DeleteUser { internal_id } => {
                 let token = match &header.session_id {
                     Some(t) => t,
                     None => return AuthResponse::Error("Missing session token".to_string()),
                 };
-                if !self.validate_root_token(token) {
-                    return AuthResponse::Error("Permission denied: Root only".to_string());
+                if !self.validate_admin_token(token) {
+                    return AuthResponse::Error("Permission denied: Administrator only".to_string());
                 }
-                if self.users.remove(&username).is_some() {
-                    self.save_db();
-                    AuthResponse::Success
+
+                // Find user by internal_id
+                let userid_hash = self.users.iter()
+                    .find(|(_, u)| u.internal_id == internal_id)
+                    .map(|(k, _)| k.clone());
+
+                if let Some(hash) = userid_hash {
+                    if let Some(user) = self.users.get_mut(&hash) {
+                        user.state = "pending_deletion".to_string();
+                        self.save_db();
+                        ayux_log(LogLevel::Info, "auth_service", &format!("User {} marked for deletion", internal_id));
+                        AuthResponse::Success
+                    } else {
+                        AuthResponse::Error("User not found".to_string())
+                    }
+                } else {
+                    AuthResponse::Error("User not found".to_string())
+                }
+            }
+            AuthRequest::ConfirmDeletion { password } => {
+                let token = match &header.session_id {
+                    Some(t) => t,
+                    None => return AuthResponse::Error("Missing session token".to_string()),
+                };
+
+                // Get user from session
+                let mut client = match AipcClient::connect(SESSION_SOCKET_PATH) {
+                    Ok(c) => c,
+                    Err(_) => return AuthResponse::Error("Session service unavailable".to_string()),
+                };
+
+                let res = client.request(
+                    "auth_service",
+                    None,
+                    AipcMessage::Session(libaipc::SessionRequest::ValidateSession {
+                        token: token.to_string(),
+                    }),
+                );
+
+                let internal_id = match res {
+                    Ok(AipcMessage::SessionRes(libaipc::SessionResponse::Valid { internal_id, .. })) => internal_id,
+                    _ => return AuthResponse::Error("Invalid session".to_string()),
+                };
+
+                let userid_hash = self.users.iter()
+                    .find(|(_, u)| u.internal_id == internal_id)
+                    .map(|(k, _)| k.clone());
+
+                if let Some(hash) = userid_hash {
+                    let user = self.users.get(&hash).unwrap();
+                    if user.state != "pending_deletion" {
+                        return AuthResponse::Error("Deletion not pending for this account".to_string());
+                    }
+
+                    let parsed_hash = match PasswordHash::new(&user.password_hash) {
+                        Ok(h) => h,
+                        Err(_) => return AuthResponse::Error("Authentication failed.".to_string()),
+                    };
+
+                    if Argon2::default().verify_password(password.as_bytes(), &parsed_hash).is_ok() {
+                        // DELETE DATA
+                        let home_dir = format!("/users/{}", internal_id);
+                        if let Err(e) = fs::remove_dir_all(&home_dir) {
+                            ayux_log(LogLevel::Error, "auth_service", &format!("Failed to delete home dir: {}", e));
+                        }
+
+                        self.users.remove(&hash);
+                        self.save_db();
+                        ayux_log(LogLevel::Info, "auth_service", &format!("User {} permanently deleted", internal_id));
+                        AuthResponse::Success
+                    } else {
+                        AuthResponse::Error("Authentication failed.".to_string())
+                    }
                 } else {
                     AuthResponse::Error("User not found".to_string())
                 }
@@ -292,11 +431,12 @@ impl AuthService {
                     Some(t) => t,
                     None => return AuthResponse::Error("Missing session token".to_string()),
                 };
-                if !self.validate_root_token(token) {
-                    return AuthResponse::Error("Permission denied: Root only".to_string());
+                if !self.validate_admin_token(token) {
+                    return AuthResponse::Error("Permission denied: Administrator only".to_string());
                 }
-                let usernames = self.users.keys().cloned().collect();
-                AuthResponse::UserList(usernames)
+                // Return Display Names instead of UserIDs
+                let display_names = self.users.values().map(|u| u.display_name.clone()).collect();
+                AuthResponse::UserList(display_names)
             }
             AuthRequest::CountUsers => AuthResponse::UserCount(self.users.len()),
         }

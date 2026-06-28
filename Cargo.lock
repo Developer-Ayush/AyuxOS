@@ -19,12 +19,14 @@ name = "auth_service"
 version = "0.1.0"
 dependencies = [
  "argon2",
+ "hex",
  "libaipc",
  "libayux",
  "nix",
  "rand",
  "serde",
  "serde_json",
+ "uuid",
 ]
 
 [[package]]
@@ -297,6 +299,18 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ed5909b6e89a2db4456e54cd5f673791d7eca6732202bbf2a9cc504fe2f9b84a"
 
 [[package]]
+name = "hex"
+version = "0.4.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7f24254aa9a54b5c858eaee2f5bccdb46aaf0e486a595ed5fd8f86ba55232a70"
+
+[[package]]
+name = "hmac-sha256"
+version = "1.1.14"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ec9d92d097f4749b64e8cc33d924d9f40a2d4eb91402b458014b781f5733d60f"
+
+[[package]]
 name = "indexmap"
 version = "2.14.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -337,6 +351,8 @@ dependencies = [
 name = "libayux"
 version = "0.1.0"
 dependencies = [
+ "getrandom 0.2.17",
+ "hmac-sha256",
  "libaipc",
  "libc",
  "nix",

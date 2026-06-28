@@ -33,40 +33,33 @@ fn main() {
             continue;
         }
 
-        if let Err(e) = libayux::validate_username(username) {
-            println!("\nAuthentication failed.");
-            println!("{}\n", e);
-            continue;
-        }
-
         println!("Password:");
         let password = read_password();
 
         match authenticate(username, &password) {
-            Ok((uid, uname, role, caps)) => {
+            Ok((internal_id, uname, display_name, role, caps)) => {
                 ayux_log(
                     LogLevel::Info,
                     "login_manager",
-                    &format!("Login success: {}", uname),
+                    &format!("Login success for internal_id: {}", internal_id),
                 );
                 // Clear screen for a fresh session
                 print!("\x1B[2J\x1B[1;1H");
-                println!("\nWelcome, {}!\n", uname);
-                match create_session(uid, uname, role, caps) {
+                println!("\nWelcome, {}!\n", display_name);
+                match create_session(internal_id, uname, display_name, role, caps) {
                     Ok(token) => {
                         wait_for_session(&token);
                     }
                     Err(e) => println!("\nError: Failed to create session: {}\n", e),
                 }
             }
-            Err(e) => {
+            Err(_) => {
                 ayux_log(
                     LogLevel::Warn,
                     "login_manager",
-                    &format!("Login failure for {}: {}", username, e),
+                    &format!("Login failure for {}", username),
                 );
-                println!("\nAuthentication failed.");
-                println!("{}\n", e);
+                println!("\nAuthentication failed.\n");
             }
         }
     }
@@ -123,7 +116,7 @@ fn run_setup_wizard() {
             continue;
         }
 
-        match create_user(&username, &password, &display_name, "Administrator") {
+        match create_user(&username, &password, &display_name, "Administrator", None) {
             Ok(_) => {
                 println!("\nAdministrator account created successfully.");
                 println!("Proceeding to login...\n");
@@ -159,13 +152,14 @@ fn create_user(
     password: &str,
     display_name: &str,
     role: &str,
+    session_token: Option<String>,
 ) -> Result<(), String> {
     let mut client = AipcClient::connect(AUTH_SOCKET_PATH).map_err(|e| e.to_string())?;
 
     let res = client
         .request(
             "login_manager",
-            None,
+            session_token,
             AipcMessage::Auth(AuthRequest::CreateUser {
                 username: username.to_string(),
                 password: password.to_string(),
@@ -185,7 +179,7 @@ fn create_user(
 fn authenticate(
     username: &str,
     password: &str,
-) -> Result<(u32, String, String, Vec<String>), String> {
+) -> Result<(String, String, String, String, Vec<String>), String> {
     let mut client = AipcClient::connect(AUTH_SOCKET_PATH).map_err(|e| e.to_string())?;
 
     let res = client
@@ -201,38 +195,34 @@ fn authenticate(
 
     match res {
         AipcMessage::AuthRes(AuthResponse::Authenticated {
-            uid,
+            internal_id,
             username,
+            display_name,
             role,
             capabilities,
-        }) => Ok((uid, username, role, capabilities)),
+        }) => Ok((internal_id, username, display_name, role, capabilities)),
         AipcMessage::AuthRes(AuthResponse::Error(e)) => Err(e),
         _ => Err("Invalid response from auth service".to_string()),
     }
 }
 
 fn create_session(
-    uid: u32,
+    internal_id: String,
     username: String,
+    display_name: String,
     role: String,
     capabilities: Vec<String>,
 ) -> Result<String, String> {
     let mut client = AipcClient::connect(SESSION_SOCKET_PATH).map_err(|e| e.to_string())?;
-
-    // We need to update SessionRequest to include role and capabilities
-    // Or we update Session Manager to fetch them.
-    // Requirement 4.2 in set_plan said: Update `CreateSession` to retrieve user details from `auth_service`.
-    // But currently I'm passing them from login_manager because I updated AuthResponse.
-
-    // Let's update libaipc first to include role and capabilities in SessionRequest::CreateSession
 
     let res = client
         .request(
             "login_manager",
             None,
             AipcMessage::Session(SessionRequest::CreateSession {
-                uid,
+                internal_id,
                 username,
+                display_name,
                 role,
                 capabilities,
             }),
@@ -247,8 +237,6 @@ fn create_session(
 }
 
 fn wait_for_session(token: &str) {
-    // For now, we just wait for the session to end by checking if it's still valid
-    // In a real system, we might use a more efficient notification mechanism
     loop {
         std::thread::sleep(std::time::Duration::from_secs(1));
         let mut client = match AipcClient::connect(SESSION_SOCKET_PATH) {
