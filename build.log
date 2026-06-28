@@ -1,0 +1,86 @@
+cargo build --release --target x86_64-unknown-linux-musl
+warning: field `path` is never read
+  --> libraries/libayux_hal/src/display.rs:15:5
+   |
+14 | pub struct LinuxFramebuffer {
+   |            ---------------- field in this struct
+15 |     path: String,
+   |     ^^^^
+   |
+   = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: `libayux_hal` (lib) generated 1 warning
+   Compiling security_manager v0.1.0 (/app/services/security_manager)
+   Compiling login_manager v0.1.0 (/app/system_apps/login_manager)
+   Compiling ayux_shell v0.1.0 (/app/system_apps/ayux_shell)
+warning: unused import: `std::fs`
+ --> services/session_manager/src/main.rs:4:5
+  |
+4 | use std::fs;
+  |     ^^^^^^^
+  |
+  = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: constant `AUTH_SOCKET_PATH` is never used
+  --> services/session_manager/src/main.rs:13:7
+   |
+13 | const AUTH_SOCKET_PATH: &str = "/run/auth.sock";
+   |       ^^^^^^^^^^^^^^^^
+   |
+   = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: field `token` is never read
+  --> services/session_manager/src/main.rs:16:5
+   |
+15 | struct Session {
+   |        ------- field in this struct
+16 |     token: String,
+   |     ^^^^^
+
+warning: `session_manager` (bin "session_manager") generated 3 warnings (run `cargo fix --bin "session_manager" -p session_manager` to apply 1 suggestion)
+   Compiling auth_service v0.1.0 (/app/services/auth_service)
+warning: unused imports: `AIPC_VERSION`, `AipcEnvelope`, `AipcHeader`, and `MessageType`
+ --> system_apps/login_manager/src/main.rs:1:100
+  |
+1 | ...esponse, AipcEnvelope, AipcHeader, MessageType, AIPC_VERSION, LogLevel};
+  |             ^^^^^^^^^^^^  ^^^^^^^^^^  ^^^^^^^^^^^  ^^^^^^^^^^^^
+  |
+  = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused imports: `PathBuf` and `Path`
+ --> services/security_manager/src/main.rs:3:17
+  |
+3 | use std::path::{Path, PathBuf};
+  |                 ^^^^  ^^^^^^^
+  |
+  = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused imports: `HashMap` and `HashSet`
+ --> services/security_manager/src/main.rs:5:24
+  |
+5 | use std::collections::{HashMap, HashSet};
+  |                        ^^^^^^^  ^^^^^^^
+
+warning: method `verify_signature` is never used
+  --> services/security_manager/src/main.rs:68:8
+   |
+24 | impl SecurityManager {
+   | -------------------- method in this implementation
+...
+68 |     fn verify_signature(&self, public_key_bytes: &[u8], message: &[u8], ...
+   |        ^^^^^^^^^^^^^^^^
+   |
+   = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+   Compiling network_manager v0.1.0 (/app/services/network_manager)
+warning: `login_manager` (bin "login_manager") generated 1 warning (run `cargo fix --bin "login_manager" -p login_manager` to apply 1 suggestion)
+   Compiling milestone3_tests v0.1.0 (/app/tests/milestone3)
+   Compiling log_service v0.1.0 (/app/services/log_service)
+warning: `security_manager` (bin "security_manager") generated 3 warnings (run `cargo fix --bin "security_manager" -p security_manager` to apply 2 suggestions)
+    Finished `release` profile [optimized] target(s) in 2.44s
+./scripts/generate_rootfs.sh /app/build /app
+Assembling rootfs in /app/build/rootfs...
+Using target: x86_64-unknown-linux-musl
+Packing initramfs...
+12910 blocks
+Initramfs generated at /app/build/initramfs.cpio.gz
