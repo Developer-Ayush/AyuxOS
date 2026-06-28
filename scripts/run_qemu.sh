@@ -12,6 +12,9 @@ qemu-system-x86_64 \
     -kernel "$KERNEL_IMAGE" \
     -initrd "$INITRAMFS" \
     -append "console=ttyS0 quiet" \
-    -nographic \
     -m 512M \
-    -no-reboot
+    -no-reboot \
+    -vga virtio \
+    -monitor unix:/tmp/qemu-monitor.sock,server,nowait \
+    -device virtio-keyboard-pci \
+    -device virtio-mouse-pci

@@ -29,16 +29,17 @@ struct WindowServer {
 }
 
 impl WindowServer {
-    fn new() -> Self {
-        let display = LinuxFramebuffer::new("/dev/fb0").expect("Could not open /dev/fb0");
-        Self {
+    fn new() -> Result<Self, String> {
+        let display = LinuxFramebuffer::new("/dev/fb0")
+            .map_err(|e| format!("Could not open /dev/fb0: {:?}", e))?;
+        Ok(Self {
             display,
             windows: Vec::new(),
             next_window_id: 1,
             focused_window_id: None,
             mouse_x: 512,
             mouse_y: 384,
-        }
+        })
     }
 
     fn create_window(&mut self, title: String, width: u32, height: u32, shm_name: String, stream: UnixStream) -> u32 {
@@ -155,7 +156,15 @@ fn main() {
         let _ = fs::remove_file(socket_path);
     }
 
-    let server = Arc::new(Mutex::new(WindowServer::new()));
+    let server_instance = match WindowServer::new() {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("Error: Window Server failed to initialize: {}", e);
+            std::process::exit(1);
+        }
+    };
+
+    let server = Arc::new(Mutex::new(server_instance));
 
     let server_ipc = Arc::clone(&server);
     thread::spawn(move || {
