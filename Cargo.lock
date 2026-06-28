@@ -20,6 +20,7 @@ version = "0.1.0"
 dependencies = [
  "argon2",
  "libaipc",
+ "libayux",
  "nix",
  "rand",
  "serde",
@@ -46,6 +47,7 @@ name = "ayux_shell"
 version = "0.1.0"
 dependencies = [
  "libaipc",
+ "libayux",
  "nix",
  "termion",
 ]
@@ -375,6 +377,7 @@ name = "login_manager"
 version = "0.1.0"
 dependencies = [
  "libaipc",
+ "libayux",
  "tempfile",
  "termion",
 ]
@@ -412,6 +415,7 @@ dependencies = [
 name = "milestone3_tests"
 version = "0.1.0"
 dependencies = [
+ "argon2",
  "bincode",
  "libaipc",
  "libayux_hal",
@@ -577,6 +581,7 @@ version = "0.1.0"
 dependencies = [
  "ed25519-dalek",
  "libaipc",
+ "libayux_hal",
  "nix",
  "serde",
  "serde_json",

@@ -9,6 +9,8 @@ use argon2::{
 };
 use std::fs::{self, File};
 use std::io::{self, Read, Write};
+use libayux::ayux_log;
+use libaipc::LogLevel;
 use std::path::Path;
 use std::collections::HashMap;
 
@@ -19,9 +21,14 @@ const SESSION_SOCKET_PATH: &str = "/run/session.sock";
 #[derive(Serialize, Deserialize, Clone, Debug)]
 struct UserRecord {
     username: String,
+    display_name: String,
     uid: u32,
     password_hash: String,
-    metadata: HashMap<String, String>,
+    home_dir: String,
+    shell: String,
+    role: String,
+    capabilities: Vec<String>,
+    state: String,
 }
 
 struct AuthService {
@@ -34,28 +41,7 @@ impl AuthService {
             users: HashMap::new(),
         };
         service.load_db();
-
-        // Ensure root user exists if db is empty
-        if service.users.is_empty() {
-            service.create_initial_root();
-        }
-
         service
-    }
-
-    fn create_initial_root(&mut self) {
-        let salt = SaltString::generate(&mut OsRng);
-        let argon2 = Argon2::default();
-        let password_hash = argon2.hash_password("ayuxos".as_bytes(), &salt).expect("Failed to hash root password").to_string();
-
-        let root = UserRecord {
-            username: "root".to_string(),
-            uid: 0,
-            password_hash,
-            metadata: HashMap::new(),
-        };
-        self.users.insert("root".to_string(), root);
-        self.save_db();
     }
 
     fn load_db(&mut self) {
@@ -94,9 +80,20 @@ impl AuthService {
         match request {
             AuthRequest::Login { username, password } => {
                 if let Some(user) = self.users.get(&username) {
-                    let parsed_hash = PasswordHash::new(&user.password_hash).expect("Invalid password hash in DB");
+                    if user.state != "active" {
+                        return AuthResponse::Error("Account is not active".to_string());
+                    }
+                    let parsed_hash = match PasswordHash::new(&user.password_hash) {
+                        Ok(h) => h,
+                        Err(_) => return AuthResponse::Error("Invalid password hash in DB".to_string()),
+                    };
                     if Argon2::default().verify_password(password.as_bytes(), &parsed_hash).is_ok() {
-                        AuthResponse::Authenticated { uid: user.uid, username: user.username.clone() }
+                        AuthResponse::Authenticated {
+                            uid: user.uid,
+                            username: user.username.clone(),
+                            role: user.role.clone(),
+                            capabilities: user.capabilities.clone(),
+                        }
                     } else {
                         AuthResponse::Error("Invalid password".to_string())
                     }
@@ -106,7 +103,10 @@ impl AuthService {
             },
             AuthRequest::ChangePassword { username, old_password, new_password } => {
                  if let Some(user) = self.users.get_mut(&username) {
-                    let parsed_hash = PasswordHash::new(&user.password_hash).expect("Invalid password hash in DB");
+                    let parsed_hash = match PasswordHash::new(&user.password_hash) {
+                        Ok(h) => h,
+                        Err(_) => return AuthResponse::Error("Invalid password hash in DB".to_string()),
+                    };
                     if Argon2::default().verify_password(old_password.as_bytes(), &parsed_hash).is_ok() {
                         let salt = SaltString::generate(&mut OsRng);
                         user.password_hash = Argon2::default().hash_password(new_password.as_bytes(), &salt)
@@ -120,29 +120,57 @@ impl AuthService {
                     AuthResponse::Error("User not found".to_string())
                 }
             },
-            AuthRequest::CreateUser { username, password } => {
-                let token = match &header.session_id {
-                    Some(t) => t,
-                    None => return AuthResponse::Error("Missing session token".to_string()),
-                };
-                if !self.validate_root_token(token) {
-                    return AuthResponse::Error("Permission denied: Root only".to_string());
+            AuthRequest::CreateUser { username, password, display_name, role } => {
+                // Allow creating the first user (Administrator) without a session token
+                if !self.users.is_empty() {
+                    let token = match &header.session_id {
+                        Some(t) => t,
+                        None => return AuthResponse::Error("Missing session token".to_string()),
+                    };
+                    if !self.validate_root_token(token) {
+                        return AuthResponse::Error("Permission denied: Root only".to_string());
+                    }
                 }
+
                 if self.users.contains_key(&username) {
                     return AuthResponse::Error("User already exists".to_string());
                 }
 
-                let uid = (self.users.values().map(|u| u.uid).max().unwrap_or(1000) + 1).max(1001);
+                let uid = if self.users.is_empty() {
+                    1000
+                } else {
+                    (self.users.values().map(|u| u.uid).max().unwrap_or(1000) + 1).max(1001)
+                };
+
                 let salt = SaltString::generate(&mut OsRng);
                 let password_hash = Argon2::default().hash_password(password.as_bytes(), &salt)
                     .expect("Failed to hash password").to_string();
 
+                let home_dir = format!("/users/{}", username);
+                let capabilities = if role == "Administrator" {
+                    vec!["FsRead".to_string(), "FsWrite".to_string(), "NetworkManage".to_string(), "ServiceManage".to_string(), "Admin".to_string(), "DeviceAccess".to_string()]
+                } else {
+                    vec!["FsRead".to_string(), "FsWrite".to_string()]
+                };
+
                 let user = UserRecord {
                     username: username.clone(),
+                    display_name,
                     uid,
                     password_hash,
-                    metadata: HashMap::new(),
+                    home_dir: home_dir.clone(),
+                    shell: "/bin/ayux_shell".to_string(),
+                    role,
+                    capabilities,
+                    state: "active".to_string(),
                 };
+
+                // Create home directory and default subdirectories
+                if let Err(e) = self.create_home_dir(&home_dir) {
+                    return AuthResponse::Error(format!("Failed to create home directory: {}", e));
+                }
+
+                ayux_log(LogLevel::Info, "auth_service", &format!("User created: {}", username));
                 self.users.insert(username, user);
                 self.save_db();
                 AuthResponse::Success
@@ -154,9 +182,6 @@ impl AuthService {
                 };
                 if !self.validate_root_token(token) {
                     return AuthResponse::Error("Permission denied: Root only".to_string());
-                }
-                if username == "root" {
-                    return AuthResponse::Error("Cannot delete root".to_string());
                 }
                 if self.users.remove(&username).is_some() {
                     self.save_db();
@@ -175,8 +200,20 @@ impl AuthService {
                 }
                 let usernames = self.users.keys().cloned().collect();
                 AuthResponse::UserList(usernames)
+            },
+            AuthRequest::CountUsers => {
+                AuthResponse::UserCount(self.users.len())
             }
         }
+    }
+
+    fn create_home_dir(&self, path: &str) -> io::Result<()> {
+        fs::create_dir_all(path)?;
+        let subdirs = ["Desktop", "Documents", "Downloads", "Pictures", "Music", "Videos", "Config"];
+        for subdir in &subdirs {
+            fs::create_dir_all(format!("{}/{}", path, subdir))?;
+        }
+        Ok(())
     }
 }
 

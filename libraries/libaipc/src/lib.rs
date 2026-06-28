@@ -32,22 +32,34 @@ pub struct AipcEnvelope {
 pub enum AuthRequest {
     Login { username: String, password: String },
     ChangePassword { username: String, old_password: String, new_password: String },
-    CreateUser { username: String, password: String },
+    CreateUser {
+        username: String,
+        password: String,
+        display_name: String,
+        role: String,
+    },
     DeleteUser { username: String },
     ListUsers,
+    CountUsers,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub enum AuthResponse {
     Success,
-    Authenticated { uid: u32, username: String },
+    Authenticated { uid: u32, username: String, role: String, capabilities: Vec<String> },
     Error(String),
     UserList(Vec<String>),
+    UserCount(usize),
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub enum SessionRequest {
-    CreateSession { uid: u32, username: String },
+    CreateSession {
+        uid: u32,
+        username: String,
+        role: String,
+        capabilities: Vec<String>,
+    },
     DestroySession { token: String },
     ValidateSession { token: String },
 }
@@ -56,7 +68,12 @@ pub enum SessionRequest {
 pub enum SessionResponse {
     Success { token: String },
     Error(String),
-    Valid { uid: u32, username: String },
+    Valid {
+        uid: u32,
+        username: String,
+        role: String,
+        capabilities: Vec<String>,
+    },
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -67,6 +84,8 @@ pub enum SecurityRequest {
     FsWrite { path: String, content: Vec<u8> },
     FsMkdir { path: String },
     FsTouch { path: String },
+    PowerReboot,
+    PowerShutdown,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]

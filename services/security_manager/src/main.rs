@@ -19,72 +19,50 @@ pub enum Capability {
     DeviceAccess,
 }
 
-struct SecurityManager {
-    // Role-based access control
-    role_capabilities: HashMap<String, HashSet<Capability>>,
-}
+struct SecurityManager;
 
 impl SecurityManager {
     fn new() -> Self {
-        let mut role_capabilities = HashMap::new();
-
-        let mut root_caps = HashSet::new();
-        root_caps.insert(Capability::FsRead);
-        root_caps.insert(Capability::FsWrite);
-        root_caps.insert(Capability::NetworkManage);
-        root_caps.insert(Capability::ServiceManage);
-        root_caps.insert(Capability::Admin);
-        root_caps.insert(Capability::DeviceAccess);
-        role_capabilities.insert("root".to_string(), root_caps);
-
-        let mut user_caps = HashSet::new();
-        user_caps.insert(Capability::FsRead);
-        user_caps.insert(Capability::FsWrite);
-        role_capabilities.insert("user".to_string(), user_caps);
-
-        Self { role_capabilities }
+        Self
     }
 
-    fn validate_session(&self, token: &str) -> Option<(u32, String)> {
+    fn validate_session(&self, token: &str) -> Option<(u32, String, Vec<String>)> {
         let mut client = AipcClient::connect(SESSION_SOCKET_PATH).ok()?;
         let res = client.request("security_manager", None, AipcMessage::Session(SessionRequest::ValidateSession { token: token.to_string() })).ok()?;
 
         match res {
-            AipcMessage::SessionRes(SessionResponse::Valid { uid, username }) => Some((uid, username)),
+            AipcMessage::SessionRes(SessionResponse::Valid { uid, username, capabilities, .. }) => Some((uid, username, capabilities)),
             _ => None,
         }
     }
 
-    fn has_capability(&self, username: &str, cap: Capability) -> bool {
-        let role = if username == "root" { "root" } else { "user" };
-        self.role_capabilities.get(role).map(|caps| caps.contains(&cap)).unwrap_or(false)
+    fn has_capability(&self, capabilities: &[String], cap: &str) -> bool {
+        capabilities.iter().any(|c| c == cap)
     }
 
-    fn is_allowed(&self, _uid: u32, username: &str, operation: &str, path: &str) -> bool {
+    fn is_allowed(&self, _uid: u32, username: &str, capabilities: &[String], operation: &str, path: &str) -> bool {
         // Enforce capabilities
         match operation {
-            "read" | "ls" => if !self.has_capability(username, Capability::FsRead) { return false; },
-            "write" | "mkdir" | "touch" => if !self.has_capability(username, Capability::FsWrite) { return false; },
+            "read" | "ls" => if !self.has_capability(capabilities, "FsRead") { return false; },
+            "write" | "mkdir" | "touch" => if !self.has_capability(capabilities, "FsWrite") { return false; },
+            "reboot" | "shutdown" => if !self.has_capability(capabilities, "Admin") { return false; },
             _ => {},
         }
 
         // Standard path-based restrictions
-        if username == "root" {
-            if path.starts_with("/users/") {
-                return false;
+        let user_home = format!("/users/{}", username);
+        if path.starts_with(&user_home) || path.starts_with("/tmp") || path.starts_with("/bin") || path.starts_with("/usr") || path.starts_with("/etc") || path.starts_with("/run") || path.starts_with("/proc") || path.starts_with("/sys") || path.starts_with("/dev") {
+            if path.contains("..") { return false; }
+            if path.starts_with("/main") || path.starts_with("/root") {
+                return self.has_capability(capabilities, "Admin");
+            }
+            if path.starts_with("/users/") && !path.starts_with(&user_home) {
+                return self.has_capability(capabilities, "Admin");
             }
             return true;
         }
 
-        let user_home = format!("/users/{}", username);
-        if path.starts_with(&user_home) || path.starts_with("/tmp") || path.starts_with("/bin") || path.starts_with("/usr") || path.starts_with("/etc") || path.starts_with("/run") || path.starts_with("/proc") || path.starts_with("/sys") || path.starts_with("/dev") {
-            if path.contains("..") { return false; }
-            if path.starts_with("/main") || path.starts_with("/root") { return false; }
-            if path.starts_with("/users/") && !path.starts_with(&user_home) { return false; }
-            return true;
-        }
-
-        false
+        self.has_capability(capabilities, "Admin")
     }
 
     fn verify_signature(&self, public_key_bytes: &[u8], message: &[u8], signature_bytes: &[u8]) -> bool {
@@ -112,6 +90,8 @@ impl SecurityManager {
             SecurityRequest::FsWrite { path, .. } => ("write", path.as_str()),
             SecurityRequest::FsMkdir { path, .. } => ("mkdir", path.as_str()),
             SecurityRequest::FsTouch { path, .. } => ("touch", path.as_str()),
+            SecurityRequest::PowerReboot => ("reboot", "/"),
+            SecurityRequest::PowerShutdown => ("shutdown", "/"),
         };
 
         let token = match &header.session_id {
@@ -119,17 +99,29 @@ impl SecurityManager {
             None => return SecurityResponse::Denied("Missing session token".to_string()),
         };
 
-        let (uid, username) = match self.validate_session(token) {
+        let (uid, username, capabilities) = match self.validate_session(token) {
             Some(data) => data,
             None => return SecurityResponse::Denied("Invalid session".to_string()),
         };
 
-        if !self.is_allowed(uid, &username, operation, path) {
+        if !self.is_allowed(uid, &username, &capabilities, operation, path) {
             return SecurityResponse::Denied(format!("Permission denied for {} on {}", operation, path));
         }
 
         match request {
             SecurityRequest::Authorize { .. } => SecurityResponse::Allowed,
+            SecurityRequest::PowerReboot => {
+                use libayux_hal::power::{Power, LinuxPower};
+                let power = LinuxPower;
+                let _ = power.reboot();
+                SecurityResponse::Success
+            },
+            SecurityRequest::PowerShutdown => {
+                use libayux_hal::power::{Power, LinuxPower};
+                let power = LinuxPower;
+                let _ = power.shutdown();
+                SecurityResponse::Success
+            },
             SecurityRequest::FsLs { path, .. } => {
                 match fs::read_dir(path) {
                     Ok(entries) => {

@@ -10,11 +10,14 @@ use nix::unistd::Pid;
 use std::io;
 
 const SESSION_SOCKET_PATH: &str = "/run/session.sock";
+const AUTH_SOCKET_PATH: &str = "/run/auth.sock";
 
 struct Session {
     token: String,
     uid: u32,
     username: String,
+    role: String,
+    capabilities: Vec<String>,
     child_pid: Option<u32>,
 }
 
@@ -29,16 +32,15 @@ impl SessionManager {
         }
     }
 
-    fn create_session(&mut self, uid: u32, username: String) -> SessionResponse {
+    fn create_session(&mut self, uid: u32, username: String, role: String, capabilities: Vec<String>) -> SessionResponse {
         let token = Uuid::new_v4().to_string();
-
-        // Create user directories if they don't exist
-        self.ensure_user_dirs(&username);
 
         let mut session = Session {
             token: token.clone(),
             uid,
             username: username.clone(),
+            role,
+            capabilities,
             child_pid: None,
         };
 
@@ -50,15 +52,6 @@ impl SessionManager {
                 SessionResponse::Success { token }
             },
             Err(e) => SessionResponse::Error(format!("Failed to launch shell: {}", e)),
-        }
-    }
-
-    fn ensure_user_dirs(&self, username: &str) {
-        let base = format!("/users/{}", username);
-        let dirs = ["apps", "data", "logs", "config", "tmp"];
-        for dir in &dirs {
-            let path = format!("{}/{}", base, dir);
-            let _ = fs::create_dir_all(path);
         }
     }
 
@@ -107,7 +100,12 @@ impl SessionManager {
 
     fn validate_session(&self, token: String) -> SessionResponse {
         if let Some(session) = self.sessions.get(&token) {
-            SessionResponse::Valid { uid: session.uid, username: session.username.clone() }
+            SessionResponse::Valid {
+                uid: session.uid,
+                username: session.username.clone(),
+                role: session.role.clone(),
+                capabilities: session.capabilities.clone(),
+            }
         } else {
             SessionResponse::Error("Invalid session".to_string())
         }
@@ -115,7 +113,7 @@ impl SessionManager {
 
     fn handle_request(&mut self, request: SessionRequest) -> SessionResponse {
         match request {
-            SessionRequest::CreateSession { uid, username } => self.create_session(uid, username),
+            SessionRequest::CreateSession { uid, username, role, capabilities } => self.create_session(uid, username, role, capabilities),
             SessionRequest::DestroySession { token } => self.destroy_session(token),
             SessionRequest::ValidateSession { token } => self.validate_session(token),
         }
