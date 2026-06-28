@@ -29,7 +29,7 @@ struct ServiceInfo {
 }
 
 fn main() {
-    libayux::print_heading("AyuxOS - Foundation Security");
+    libayux::print_heading("AyuxOS - Graphical Foundation");
     println!("AyuxOS Booting...\n");
 
     if let Err(e) = libayux::mount_basic_filesystems() {
@@ -40,10 +40,6 @@ fn main() {
 
     let config_path = "/etc/ayux_services.toml";
     let config_str = fs::read_to_string(config_path).unwrap_or_else(|_| {
-        eprintln!(
-            "[Ayux Init] ERROR: Could not read {}, using hardcoded fallback",
-            config_path
-        );
         r#"
         [services.log_service]
         path = "/bin/log_service"
@@ -79,6 +75,13 @@ fn main() {
         restart_policy = "always"
         priority = 3
         health_check_socket = "/run/network.sock"
+
+        [services.window_server]
+        path = "/bin/window_server"
+        dependencies = ["log_service"]
+        restart_policy = "always"
+        priority = 4
+        health_check_socket = "/run/window_server.sock"
         "#
         .to_string()
     });
@@ -100,7 +103,6 @@ fn main() {
         })
         .collect();
 
-    // Startup based on priority
     let mut to_start: Vec<String> = services.keys().cloned().collect();
     to_start.sort_by_key(|name| services[name].config.priority);
 
@@ -111,6 +113,7 @@ fn main() {
             "session_manager" => "Session Manager",
             "security_manager" => "Security Manager",
             "network_manager" => "Network Manager",
+            "window_server" => "Window Server & Compositor",
             _ => &name,
         };
         print!(" • Starting {:<30}", display_name);
@@ -131,34 +134,26 @@ fn main() {
         thread::sleep(Duration::from_millis(100));
     }
 
-    print!(" • Starting {:<30}", "Login Manager");
+    print!(" • Starting {:<30}", "Login Manager (GUI)");
     io::stdout().flush().ok();
     let mut login_manager: Option<Child> = None;
+    let mut desktop_started = false;
 
     loop {
-        // Monitor services
         for (name, info) in services.iter_mut() {
             let mut restart_needed = false;
-
             if let Some(child) = info.child.as_mut() {
                 match child.try_wait() {
                     Ok(Some(status)) => {
-                        println!(
-                            "[Ayux Init] Service {} exited with status: {}.",
-                            name, status
-                        );
+                        println!("[Ayux Init] Service {} exited with status: {}.", name, status);
                         restart_needed = true;
                     }
                     Ok(None) => {
-                        // Check health if specified
                         if let Some(socket_path) = &info.config.health_check_socket {
                             if !Path::new(socket_path).exists() {
                                 info.consecutive_failures += 1;
                                 if info.consecutive_failures >= 5 {
-                                    println!(
-                                        "[Ayux Init] Service {} is unhealthy (socket {} missing). Killing and restarting...",
-                                        name, socket_path
-                                    );
+                                    println!("[Ayux Init] Service {} is unhealthy. Restarting...", name);
                                     let _ = child.kill();
                                     restart_needed = true;
                                     info.consecutive_failures = 0;
@@ -168,42 +163,31 @@ fn main() {
                             }
                         }
                     }
-                    Err(e) => eprintln!("[Ayux Init] Error monitoring {}: {}", name, e),
+                    Err(_) => restart_needed = true,
                 }
             } else {
                 restart_needed = true;
             }
 
             if restart_needed && info.config.restart_policy == "always" {
-                println!("[Ayux Init] Restarting {}...", name);
                 match Command::new(&info.config.path).spawn() {
                     Ok(new_child) => info.child = Some(new_child),
-                    Err(e) => eprintln!("[Ayux Init] Failed to restart {}: {}", name, e),
+                    Err(_) => {}
                 }
             }
         }
 
-        // Manage Login Manager
         let login_manager_needs_start = match login_manager.as_mut() {
             Some(child) => match child.try_wait() {
-                Ok(Some(status)) => {
-                    println!(
-                        "[Ayux Init] Login manager exited with status: {}. Restarting...",
-                        status
-                    );
-                    true
-                }
+                Ok(Some(_)) => !desktop_started,
                 Ok(None) => false,
-                Err(e) => {
-                    eprintln!("[Ayux Init] Error monitoring login manager: {}", e);
-                    true
-                }
+                Err(_) => !desktop_started,
             },
-            None => true,
+            None => !desktop_started,
         };
 
         if login_manager_needs_start {
-            match Command::new("/bin/login_manager").spawn() {
+            match Command::new("/bin/login_manager_gui").spawn() {
                 Ok(child) => {
                     if login_manager.is_none() {
                         println!("OK");
@@ -211,11 +195,19 @@ fn main() {
                     }
                     login_manager = Some(child);
                 }
-                Err(e) => {
+                Err(_) => {
                     if login_manager.is_none() {
                         println!("FAILED");
                     }
-                    eprintln!("[Ayux Init] Failed to start login manager: {}", e);
+                }
+            }
+        }
+
+        if !desktop_started {
+            let output = Command::new("pgrep").arg("-x").arg("desktop").output();
+            if let Ok(out) = output {
+                if out.status.success() {
+                    desktop_started = true;
                 }
             }
         }

@@ -205,6 +205,53 @@ pub enum HalResponse {
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
+pub enum WindowRequest {
+    CreateWindow {
+        title: String,
+        width: u32,
+        height: u32,
+        shm_name: String,
+    },
+    DestroyWindow {
+        window_id: u32,
+    },
+    Invalidate {
+        window_id: u32,
+        rect: (i32, i32, u32, u32),
+    },
+    SetTitle {
+        window_id: u32,
+        title: String,
+    },
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub enum WindowResponse {
+    WindowCreated {
+        window_id: u32,
+    },
+    Success,
+    Error(String),
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub enum WindowEvent {
+    Input {
+        event: InputEventData,
+    },
+    FocusIn,
+    FocusOut,
+    Close,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub enum InputEventData {
+    MouseMove { x: i32, y: i32, local_x: i32, local_y: i32 },
+    MouseButton { button: u16, pressed: bool, x: i32, y: i32, local_x: i32, local_y: i32 },
+    Key { code: u16, pressed: bool },
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub enum AipcMessage {
     Auth(AuthRequest),
     AuthRes(AuthResponse),
@@ -218,12 +265,15 @@ pub enum AipcMessage {
     NetworkRes(NetworkResponse),
     Hal(HalRequest),
     HalRes(HalResponse),
+    Window(WindowRequest),
+    WindowRes(WindowResponse),
+    WindowEvent(WindowEvent),
     GenericError(String),
 }
 
 pub struct AipcClient {
-    stream: UnixStream,
-    timeout: Option<std::time::Duration>,
+    pub stream: UnixStream,
+    pub timeout: Option<std::time::Duration>,
 }
 
 impl AipcClient {

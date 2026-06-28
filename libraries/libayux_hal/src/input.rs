@@ -1,12 +1,14 @@
-use super::common::HalResult;
+use super::common::{HalResult};
 use std::fs::File;
 use std::io::Read;
 
 #[derive(Debug, Clone)]
 pub enum InputEvent {
     Key { code: u16, value: i32 },
-    Rel { code: u16, value: i32 },
-    Abs { code: u16, value: i32 },
+    Rel { code: u16, axis: u16, value: i32 },
+    Abs { code: u16, axis: u16, value: i32 },
+    Sync,
+    Unknown { type_: u16, code: u16, value: i32 },
 }
 
 pub trait InputDevice {
@@ -48,22 +50,26 @@ impl InputDevice for LinuxEvdev {
         let event: input_event = unsafe { std::mem::transmute(buf) };
 
         match event.type_ {
+            0 => Ok(InputEvent::Sync),
             1 => Ok(InputEvent::Key {
                 code: event.code,
                 value: event.value,
             }),
             2 => Ok(InputEvent::Rel {
                 code: event.code,
+                axis: event.code,
                 value: event.value,
             }),
             3 => Ok(InputEvent::Abs {
                 code: event.code,
+                axis: event.code,
                 value: event.value,
             }),
-            _ => Err(super::common::HalError::InvalidOperation(format!(
-                "Unknown event type: {}",
-                event.type_
-            ))),
+            _ => Ok(InputEvent::Unknown {
+                type_: event.type_,
+                code: event.code,
+                value: event.value,
+            }),
         }
     }
 }
