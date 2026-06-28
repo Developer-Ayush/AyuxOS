@@ -6,6 +6,7 @@ use libaipc::{
 use serde::{Deserialize, Serialize};
 use std::fs::{self, File};
 use std::io;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 const SECURITY_SOCKET_PATH: &str = "/run/security.sock";
 const SESSION_SOCKET_PATH: &str = "/run/session.sock";
@@ -20,6 +21,8 @@ pub enum Capability {
     DeviceAccess,
 }
 
+static USB_AUTHORIZED: AtomicBool = AtomicBool::new(false);
+
 struct SecurityManager;
 
 impl SecurityManager {
@@ -27,7 +30,7 @@ impl SecurityManager {
         Self
     }
 
-    fn validate_session(&self, token: &str) -> Option<(u32, String, Vec<String>)> {
+    fn validate_session(&self, token: &str) -> Option<(String, String, String, Vec<String>)> {
         let mut client = AipcClient::connect(SESSION_SOCKET_PATH).ok()?;
         let res = client
             .request(
@@ -41,11 +44,12 @@ impl SecurityManager {
 
         match res {
             AipcMessage::SessionRes(SessionResponse::Valid {
-                uid,
+                internal_id,
                 username,
+                role,
                 capabilities,
                 ..
-            }) => Some((uid, username, capabilities)),
+            }) => Some((internal_id, username, role, capabilities)),
             _ => None,
         }
     }
@@ -56,8 +60,8 @@ impl SecurityManager {
 
     fn is_allowed(
         &self,
-        _uid: u32,
-        username: &str,
+        internal_id: &str,
+        role: &str,
         capabilities: &[String],
         operation: &str,
         path: &str,
@@ -79,13 +83,56 @@ impl SecurityManager {
                     return false;
                 }
             }
+            "usb_auth" => {
+                if role != "Administrator" {
+                    return false;
+                }
+            }
             _ => {}
         }
 
         // Standard path-based restrictions
-        let user_home = format!("/users/{}", username);
-        if path.starts_with(&user_home)
-            || path.starts_with("/tmp")
+        let user_home = format!("/users/{}", internal_id);
+
+        // Block path traversal
+        if path.contains("..") {
+            return false;
+        }
+
+        // /ayux is immutable and protected
+        if path.starts_with("/ayux") {
+            // The system secret is strictly off-limits to everyone except internal service use
+            // (AuthService reads it directly from disk, not via AIPC)
+            if path == "/ayux/security/system_secret" {
+                return false;
+            }
+
+            // Even admin cannot write to /ayux
+            if operation == "write" || operation == "mkdir" || operation == "touch" {
+                return false;
+            }
+            // Reading from /ayux is allowed for system processes or admin?
+            // The requirement says "Hidden from normal file browsing".
+            // For now, allow read for admin and internal use.
+            return self.has_capability(capabilities, "Admin") || path.starts_with("/ayux/lib");
+        }
+
+        // /root is administrator workspace
+        if path.starts_with("/root") {
+            return role == "Administrator";
+        }
+
+        // /users/ access rules
+        if path.starts_with("/users/") {
+            if path.starts_with(&user_home) {
+                return true;
+            }
+            // Even Administrator cannot browse another user's files
+            return false;
+        }
+
+        // Other system directories
+        if path.starts_with("/tmp")
             || path.starts_with("/bin")
             || path.starts_with("/usr")
             || path.starts_with("/etc")
@@ -94,15 +141,6 @@ impl SecurityManager {
             || path.starts_with("/sys")
             || path.starts_with("/dev")
         {
-            if path.contains("..") {
-                return false;
-            }
-            if path.starts_with("/main") || path.starts_with("/root") {
-                return self.has_capability(capabilities, "Admin");
-            }
-            if path.starts_with("/users/") && !path.starts_with(&user_home) {
-                return self.has_capability(capabilities, "Admin");
-            }
             return true;
         }
 
@@ -144,6 +182,8 @@ impl SecurityManager {
             SecurityRequest::FsTouch { path, .. } => ("touch", path.as_str()),
             SecurityRequest::PowerReboot => ("reboot", "/"),
             SecurityRequest::PowerShutdown => ("shutdown", "/"),
+            SecurityRequest::UsbSetAuthorized { .. } => ("usb_auth", "/"),
+            SecurityRequest::UsbGetStatus => ("read", "/"),
         };
 
         let token = match &header.session_id {
@@ -151,12 +191,12 @@ impl SecurityManager {
             None => return SecurityResponse::Denied("Missing session token".to_string()),
         };
 
-        let (uid, username, capabilities) = match self.validate_session(token) {
+        let (internal_id, _username, role, capabilities) = match self.validate_session(token) {
             Some(data) => data,
             None => return SecurityResponse::Denied("Invalid session".to_string()),
         };
 
-        if !self.is_allowed(uid, &username, &capabilities, operation, path) {
+        if !self.is_allowed(&internal_id, &role, &capabilities, operation, path) {
             return SecurityResponse::Denied(format!(
                 "Permission denied for {} on {}",
                 operation, path
@@ -205,6 +245,13 @@ impl SecurityManager {
                 Ok(_) => SecurityResponse::Success,
                 Err(e) => SecurityResponse::Error(e.to_string()),
             },
+            SecurityRequest::UsbSetAuthorized { authorized } => {
+                USB_AUTHORIZED.store(authorized, Ordering::SeqCst);
+                SecurityResponse::Success
+            }
+            SecurityRequest::UsbGetStatus => {
+                SecurityResponse::UsbStatus { authorized: USB_AUTHORIZED.load(Ordering::SeqCst) }
+            }
         }
     }
 }

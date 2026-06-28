@@ -29,7 +29,7 @@ struct ServiceInfo {
 }
 
 fn main() {
-    libayux::print_heading("AyuxOS - Snow Leopard Release");
+    libayux::print_heading("AyuxOS - Foundation Security");
     println!("AyuxOS Booting...\n");
 
     if let Err(e) = libayux::mount_basic_filesystems() {

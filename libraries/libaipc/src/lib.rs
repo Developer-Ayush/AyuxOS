@@ -46,7 +46,10 @@ pub enum AuthRequest {
         role: String,
     },
     DeleteUser {
-        username: String,
+        internal_id: String,
+    },
+    ConfirmDeletion {
+        password: String,
     },
     ListUsers,
     CountUsers,
@@ -56,8 +59,9 @@ pub enum AuthRequest {
 pub enum AuthResponse {
     Success,
     Authenticated {
-        uid: u32,
+        internal_id: String,
         username: String,
+        display_name: String,
         role: String,
         capabilities: Vec<String>,
     },
@@ -69,8 +73,9 @@ pub enum AuthResponse {
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub enum SessionRequest {
     CreateSession {
-        uid: u32,
+        internal_id: String,
         username: String,
+        display_name: String,
         role: String,
         capabilities: Vec<String>,
     },
@@ -89,8 +94,9 @@ pub enum SessionResponse {
     },
     Error(String),
     Valid {
-        uid: u32,
+        internal_id: String,
         username: String,
+        display_name: String,
         role: String,
         capabilities: Vec<String>,
     },
@@ -106,6 +112,8 @@ pub enum SecurityRequest {
     FsTouch { path: String },
     PowerReboot,
     PowerShutdown,
+    UsbSetAuthorized { authorized: bool },
+    UsbGetStatus,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -116,7 +124,9 @@ pub enum SecurityResponse {
     FsContent(Vec<u8>),
     Success,
     Error(String),
+    UsbStatus { authorized: bool },
 }
+
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub enum LogLevel {

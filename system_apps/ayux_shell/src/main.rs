@@ -1,13 +1,16 @@
-use libaipc::{AipcClient, AipcMessage, LogLevel, SecurityRequest, SecurityResponse};
+use libaipc::{AipcClient, AipcMessage, AuthRequest, AuthResponse, LogLevel, SecurityRequest, SecurityResponse};
 use libayux::ayux_log;
 use std::env;
 use std::io::{self, Write};
 
+const AUTH_SOCKET_PATH: &str = "/run/auth.sock";
 const SECURITY_SOCKET_PATH: &str = "/run/security.sock";
 const SESSION_SOCKET_PATH: &str = "/run/session.sock";
 
 struct Shell {
     username: String,
+    display_name: String,
+    internal_id: String,
     token: String,
     cwd: String,
     history: Vec<String>,
@@ -16,15 +19,19 @@ struct Shell {
 impl Shell {
     fn new() -> Self {
         let username = env::var("USER").unwrap_or_else(|_| "unknown".to_string());
+        let display_name = env::var("DISPLAY_NAME").unwrap_or_else(|_| username.clone());
+        let internal_id = env::var("AYUX_INTERNAL_ID").unwrap_or_else(|_| "unknown".to_string());
         let token = env::var("AYUX_SESSION_TOKEN").unwrap_or_else(|_| "none".to_string());
         let cwd = if username == "root" {
             "/root".to_string()
         } else {
-            format!("/users/{}", username)
+            format!("/users/{}", internal_id)
         };
 
         Self {
             username,
+            display_name,
+            internal_id,
             token,
             cwd,
             history: Vec::new(),
@@ -39,6 +46,7 @@ impl Shell {
         );
 
         libayux::print_heading("Ayux Shell");
+        println!("Welcome, {}!", self.display_name);
         println!("Type 'help' for available commands.\n");
 
         loop {
@@ -119,6 +127,25 @@ impl Shell {
                         println!("{:4}  {}", i + 1, cmd);
                     }
                 }
+                "confirm_deletion" => self.confirm_deletion(),
+                "create_user" => {
+                    if parts.len() < 2 {
+                        println!("Usage: create_user <username>");
+                    } else {
+                        self.create_user_wizard(parts[1]);
+                    }
+                }
+                "delete_user" => {
+                    if parts.len() < 2 {
+                        println!("Usage: delete_user <internal_id>");
+                    } else {
+                        self.delete_user(parts[1]);
+                    }
+                }
+                "list_users" => self.list_users(),
+                "usb_authorize" => self.usb_set_authorized(true),
+                "usb_unauthorize" => self.usb_set_authorized(false),
+                "usb_status" => self.usb_get_status(),
                 cmd => {
                     println!("Unknown command: '{}'", cmd);
                     println!("Type 'help' to see available commands.");
@@ -130,22 +157,29 @@ impl Shell {
 
     fn print_help(&self) {
         println!("\nAvailable commands:");
-        println!("  help            - Display this help message");
-        println!("  exit, logout    - End the current session");
-        println!("  pwd             - Print current working directory");
-        println!("  cd <dir>        - Change current working directory");
-        println!("  ls [path]       - List directory contents");
-        println!("  cat <file>      - Display file contents");
-        println!("  mkdir <dir>     - Create a new directory");
-        println!("  touch <file>    - Create a new empty file");
-        println!("  echo [text]     - Display a line of text");
-        println!("  clear           - Clear the terminal screen");
-        println!("  whoami          - Display current user");
-        println!("  hostname        - Display system hostname");
-        println!("  date            - Display current system time");
-        println!("  reboot          - Restart the system");
-        println!("  shutdown        - Shut down the system");
-        println!("  history         - Show command history\n");
+        println!("  help                 - Display this help message");
+        println!("  exit, logout         - End the current session");
+        println!("  pwd                  - Print current working directory");
+        println!("  cd <dir>             - Change current working directory");
+        println!("  ls [path]            - List directory contents");
+        println!("  cat <file>           - Display file contents");
+        println!("  mkdir <dir>          - Create a new directory");
+        println!("  touch <file>         - Create a new empty file");
+        println!("  echo [text]          - Display a line of text");
+        println!("  clear                - Clear the terminal screen");
+        println!("  whoami               - Display current user");
+        println!("  hostname             - Display system hostname");
+        println!("  date                 - Display current system time");
+        println!("  reboot               - Restart the system");
+        println!("  shutdown             - Shut down the system");
+        println!("  history              - Show command history");
+        println!("  confirm_deletion     - Confirm deletion of YOUR account if pending");
+        println!("  create_user <uname>  - (Admin) Start create user wizard");
+        println!("  delete_user <id>     - (Admin) Mark user for deletion");
+        println!("  list_users           - (Admin) List display names of accounts");
+        println!("  usb_authorize        - (Admin) Authorize USB data sharing");
+        println!("  usb_unauthorize      - (Admin) Revoke USB data sharing");
+        println!("  usb_status           - (Admin) Get USB authorization status\n");
     }
 
     fn resolve_path(&self, path: &str) -> String {
@@ -175,13 +209,11 @@ impl Shell {
             self.cwd = if self.username == "root" {
                 "/root".to_string()
             } else {
-                format!("/users/{}", self.username)
+                format!("/users/{}", self.internal_id)
             };
             return;
         }
         let new_path = self.resolve_path(path);
-        // We should check if it exists and is a directory via Security Manager
-        // For simplicity in this milestone, we just update the CWD
         self.cwd = new_path;
     }
 
@@ -289,7 +321,6 @@ impl Shell {
     }
 
     fn logout(&self) {
-        use libaipc::SessionRequest;
         let mut client = match AipcClient::connect(SESSION_SOCKET_PATH) {
             Ok(c) => c,
             Err(e) => {
@@ -301,7 +332,7 @@ impl Shell {
         let _ = client.request(
             "ayux_shell",
             Some(self.token.clone()),
-            AipcMessage::Session(SessionRequest::DestroySession {
+            AipcMessage::Session(libaipc::SessionRequest::DestroySession {
                 token: self.token.clone(),
             }),
         );
@@ -339,10 +370,203 @@ impl Shell {
         );
     }
 
+    fn confirm_deletion(&self) {
+        println!("YOU ARE ABOUT TO PERMANENTLY DELETE YOUR ACCOUNT AND ALL DATA.");
+        println!("This action CANNOT be undone.");
+        print!("Enter your password to confirm: ");
+        io::stdout().flush().ok();
+
+        let password = self.read_password();
+
+        let mut client = match AipcClient::connect(AUTH_SOCKET_PATH) {
+            Ok(c) => c,
+            Err(e) => {
+                println!("Error connecting to auth service: {}", e);
+                return;
+            }
+        };
+
+        let res = client.request(
+            "ayux_shell",
+            Some(self.token.clone()),
+            AipcMessage::Auth(AuthRequest::ConfirmDeletion { password }),
+        );
+
+        match res {
+            Ok(AipcMessage::AuthRes(AuthResponse::Success)) => {
+                println!("\nAccount deleted. Logging out...");
+                self.logout();
+            }
+            Ok(AipcMessage::AuthRes(AuthResponse::Error(e))) => println!("\nError: {}", e),
+            _ => println!("\nUnexpected response"),
+        }
+    }
+
+    fn create_user_wizard(&self, username: &str) {
+        if let Err(e) = libayux::validate_username(username) {
+            println!("Invalid username: {}", e);
+            return;
+        }
+
+        print!("Enter Display Name: ");
+        io::stdout().flush().ok();
+        let mut display_name = String::new();
+        io::stdin().read_line(&mut display_name).ok();
+        let display_name = display_name.trim().to_string();
+
+        print!("Enter Password: ");
+        io::stdout().flush().ok();
+        let password = self.read_password();
+        println!();
+
+        print!("Enter Role (Standard/Administrator): ");
+        io::stdout().flush().ok();
+        let mut role = String::new();
+        io::stdin().read_line(&mut role).ok();
+        let role = role.trim().to_string();
+
+        let mut client = match AipcClient::connect(AUTH_SOCKET_PATH) {
+            Ok(c) => c,
+            Err(e) => {
+                println!("Error connecting to auth service: {}", e);
+                return;
+            }
+        };
+
+        let res = client.request(
+            "ayux_shell",
+            Some(self.token.clone()),
+            AipcMessage::Auth(AuthRequest::CreateUser {
+                username: username.to_string(),
+                password,
+                display_name,
+                role,
+            }),
+        );
+
+        match res {
+            Ok(AipcMessage::AuthRes(AuthResponse::Success)) => println!("User created successfully."),
+            Ok(AipcMessage::AuthRes(AuthResponse::Error(e))) => println!("Error: {}", e),
+            _ => println!("Unexpected response"),
+        }
+    }
+
+    fn delete_user(&self, internal_id: &str) {
+        let mut client = match AipcClient::connect(AUTH_SOCKET_PATH) {
+            Ok(c) => c,
+            Err(e) => {
+                println!("Error connecting to auth service: {}", e);
+                return;
+            }
+        };
+
+        let res = client.request(
+            "ayux_shell",
+            Some(self.token.clone()),
+            AipcMessage::Auth(AuthRequest::DeleteUser { internal_id: internal_id.to_string() }),
+        );
+
+        match res {
+            Ok(AipcMessage::AuthRes(AuthResponse::Success)) => println!("User marked for deletion. The user must now log in and confirm deletion."),
+            Ok(AipcMessage::AuthRes(AuthResponse::Error(e))) => println!("Error: {}", e),
+            _ => println!("Unexpected response"),
+        }
+    }
+
+    fn list_users(&self) {
+        let mut client = match AipcClient::connect(AUTH_SOCKET_PATH) {
+            Ok(c) => c,
+            Err(e) => {
+                println!("Error connecting to auth service: {}", e);
+                return;
+            }
+        };
+
+        let res = client.request(
+            "ayux_shell",
+            Some(self.token.clone()),
+            AipcMessage::Auth(AuthRequest::ListUsers),
+        );
+
+        match res {
+            Ok(AipcMessage::AuthRes(AuthResponse::UserList(users))) => {
+                println!("\nRegistered Users (Display Names):");
+                for user in users {
+                    println!(" - {}", user);
+                }
+                println!();
+            }
+            Ok(AipcMessage::AuthRes(AuthResponse::Error(e))) => println!("Error: {}", e),
+            _ => println!("Unexpected response"),
+        }
+    }
+
+    fn usb_set_authorized(&self, authorized: bool) {
+        let mut client = match AipcClient::connect(SECURITY_SOCKET_PATH) {
+            Ok(c) => c,
+            Err(e) => {
+                println!("Error connecting to security manager: {}", e);
+                return;
+            }
+        };
+
+        let res = client.request(
+            "ayux_shell",
+            Some(self.token.clone()),
+            AipcMessage::Security(SecurityRequest::UsbSetAuthorized { authorized }),
+        );
+
+        match res {
+            Ok(AipcMessage::SecurityRes(SecurityResponse::Success)) => {
+                if authorized {
+                    println!("USB data sharing authorized.");
+                } else {
+                    println!("USB data sharing unauthorized.");
+                }
+            }
+            Ok(AipcMessage::SecurityRes(SecurityResponse::Denied(e))) => println!("Denied: {}", e),
+            _ => println!("Unexpected response"),
+        }
+    }
+
+    fn usb_get_status(&self) {
+        let mut client = match AipcClient::connect(SECURITY_SOCKET_PATH) {
+            Ok(c) => c,
+            Err(e) => {
+                println!("Error connecting to security manager: {}", e);
+                return;
+            }
+        };
+
+        let res = client.request(
+            "ayux_shell",
+            Some(self.token.clone()),
+            AipcMessage::Security(SecurityRequest::UsbGetStatus),
+        );
+
+        match res {
+            Ok(AipcMessage::SecurityRes(SecurityResponse::UsbStatus { authorized })) => {
+                println!("USB Authorization Status: {}", if authorized { "Authorized" } else { "Unauthorized" });
+            }
+            Ok(AipcMessage::SecurityRes(SecurityResponse::Denied(e))) => println!("Denied: {}", e),
+            _ => println!("Unexpected response"),
+        }
+    }
+
+    fn read_password(&self) -> String {
+        use termion::input::TermRead;
+        let mut password = String::new();
+        if let Ok(Some(p)) = io::stdin().read_passwd(&mut io::stdout()) {
+            password = p;
+        }
+        password
+    }
+
     fn suggest_command(&self, cmd: &str) {
         let commands = [
             "help", "exit", "logout", "pwd", "cd", "ls", "cat", "mkdir", "touch", "echo", "clear",
-            "whoami", "hostname", "date", "reboot", "shutdown", "history",
+            "whoami", "hostname", "date", "reboot", "shutdown", "history", "confirm_deletion",
+            "create_user", "delete_user", "list_users", "usb_authorize", "usb_unauthorize", "usb_status",
         ];
 
         let mut suggestions = Vec::new();

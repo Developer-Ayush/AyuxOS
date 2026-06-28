@@ -2,16 +2,17 @@
 
 AyuxOS is a security-first mobile operating system built on the Linux kernel. It focuses on maximum security, user freedom, and performance with a minimal footprint.
 
-## Status: Snow Leopard Release (Final Polish)
+## Status: Foundation Security & Filesystem Architecture
 
-The Snow Leopard release provides a stable, professional, and production-quality command-line foundation.
+This milestone establishes the permanent identity, privacy, filesystem, and security architecture of AyuxOS.
 
 ### Key Features
-* **Robust IPC**: AIPC (Ayux Inter-Process Communication) provides a versioned, enveloped protocol for secure service interaction.
-* **Centralized Security**: The Security Manager authorizes all system operations, including filesystem access and power management.
-* **Professional CLI**: A consistent terminal style with standardized prompts and headers across all system components.
-* **Integrated Logging**: A transparent Log Service with rotation and module-specific logs.
-* **Safety First**: Written primarily in Rust with a focus on robust error handling and zero compiler warnings.
+* **Privacy-First Identity**: User IDs are never stored in plaintext and are hidden even from the administrator.
+* **Internal UUIDs**: All system components use random internal identifiers for isolation and privacy.
+* **Immutable OS Core**: The operating system resides in a read-only, protected `/ayux` partition.
+* **Isolated User Storage**: User data is stored in directories named by internal UUIDs, inaccessible to the administrator.
+* **Secure Deletion**: Account deletion requires two-step authorization (Administrator + User).
+* **Robust IPC**: AIPC provides secure, capability-based communication between services.
 
 ## Getting Started
 
