@@ -11,13 +11,11 @@ pub trait Display {
     fn flush(&mut self) -> HalResult<()>;
 }
 
-pub struct LinuxFramebuffer {
-    path: String,
-}
+pub struct LinuxFramebuffer {}
 
 impl LinuxFramebuffer {
-    pub fn new(path: &str) -> Self {
-        Self { path: path.to_string() }
+    pub fn new(_path: &str) -> Self {
+        Self {}
     }
 }
 

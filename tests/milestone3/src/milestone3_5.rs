@@ -1,16 +1,14 @@
 #[cfg(test)]
 mod milestone3_5_tests {
-    use argon2::{
-        password_hash::{PasswordHash, PasswordVerifier},
-        Argon2
-    };
+    use argon2::password_hash::PasswordHash;
 
     #[test]
     fn test_password_hashing_consistency() {
         // Test that Argon2id works as expected
-        let password = "mysecurepassword";
+        let _password = "mysecurepassword";
         // Encoded hash from a typical Argon2id run
-        let hash_str = "$argon2id$v=19$m=19456,t=2,p=1$c2FsdHNhbHQ$dGVzdGhhc2h0ZXN0aGFzaHRlc3RoYXNodGVzdGg";
+        let hash_str =
+            "$argon2id$v=19$m=19456,t=2,p=1$c2FsdHNhbHQ$dGVzdGhhc2h0ZXN0aGFzaHRlc3RoYXNodGVzdGg";
 
         // This won't actually verify because the hash is dummy, but we can test we can parse it
         let parsed_hash = PasswordHash::new(hash_str);
@@ -23,7 +21,15 @@ mod milestone3_5_tests {
         let home_dir = format!("/users/{}", username);
         assert_eq!(home_dir, "/users/testuser");
 
-        let subdirs = ["Desktop", "Documents", "Downloads", "Pictures", "Music", "Videos", "Config"];
+        let subdirs = [
+            "Desktop",
+            "Documents",
+            "Downloads",
+            "Pictures",
+            "Music",
+            "Videos",
+            "Config",
+        ];
         for subdir in &subdirs {
             let path = format!("{}/{}", home_dir, subdir);
             assert!(path.starts_with("/users/testuser/"));
@@ -45,7 +51,7 @@ mod milestone3_5_tests {
                 } else {
                     "/".to_string()
                 }
-            } else if path == "." || path == "" {
+            } else if path == "." || path.is_empty() {
                 cwd.to_string()
             } else {
                 let mut base = cwd.to_string();

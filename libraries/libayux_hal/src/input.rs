@@ -48,10 +48,22 @@ impl InputDevice for LinuxEvdev {
         let event: input_event = unsafe { std::mem::transmute(buf) };
 
         match event.type_ {
-            1 => Ok(InputEvent::Key { code: event.code, value: event.value }),
-            2 => Ok(InputEvent::Rel { code: event.code, value: event.value }),
-            3 => Ok(InputEvent::Abs { code: event.code, value: event.value }),
-            _ => Err(super::common::HalError::InvalidOperation(format!("Unknown event type: {}", event.type_))),
+            1 => Ok(InputEvent::Key {
+                code: event.code,
+                value: event.value,
+            }),
+            2 => Ok(InputEvent::Rel {
+                code: event.code,
+                value: event.value,
+            }),
+            3 => Ok(InputEvent::Abs {
+                code: event.code,
+                value: event.value,
+            }),
+            _ => Err(super::common::HalError::InvalidOperation(format!(
+                "Unknown event type: {}",
+                event.type_
+            ))),
         }
     }
 }

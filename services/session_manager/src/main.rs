@@ -1,18 +1,20 @@
-use libaipc::{AipcMessage, SessionRequest, SessionResponse, create_listener, AipcClient, AipcEnvelope, AipcHeader, MessageType, AIPC_VERSION};
+use libaipc::{
+    AIPC_VERSION, AipcClient, AipcEnvelope, AipcHeader, AipcMessage, MessageType, SessionRequest,
+    SessionResponse, create_listener,
+};
+use nix::sys::signal::{self, Signal};
+use nix::unistd::Pid;
 use std::collections::HashMap;
+use std::io;
 use std::process::{Command, Stdio};
-use std::fs;
 use std::thread;
 use std::time::Duration;
 use uuid::Uuid;
-use nix::sys::signal::{self, Signal};
-use nix::unistd::Pid;
-use std::io;
 
 const SESSION_SOCKET_PATH: &str = "/run/session.sock";
-const AUTH_SOCKET_PATH: &str = "/run/auth.sock";
 
 struct Session {
+    #[allow(dead_code)]
     token: String,
     uid: u32,
     username: String,
@@ -32,7 +34,13 @@ impl SessionManager {
         }
     }
 
-    fn create_session(&mut self, uid: u32, username: String, role: String, capabilities: Vec<String>) -> SessionResponse {
+    fn create_session(
+        &mut self,
+        uid: u32,
+        username: String,
+        role: String,
+        capabilities: Vec<String>,
+    ) -> SessionResponse {
         let token = Uuid::new_v4().to_string();
 
         let mut session = Session {
@@ -50,15 +58,15 @@ impl SessionManager {
                 session.child_pid = Some(pid);
                 self.sessions.insert(token.clone(), session);
                 SessionResponse::Success { token }
-            },
+            }
             Err(e) => SessionResponse::Error(format!("Failed to launch shell: {}", e)),
         }
     }
 
     fn launch_user_shell(&self, token: &str, username: &str) -> std::io::Result<u32> {
-        use nix::sched::{unshare, CloneFlags};
-        use std::os::unix::process::CommandExt;
+        use nix::sched::{CloneFlags, unshare};
         use nix::unistd::setsid;
+        use std::os::unix::process::CommandExt;
 
         let username = username.to_string();
 
@@ -71,11 +79,16 @@ impl SessionManager {
                 .stderr(Stdio::inherit())
                 .pre_exec(move || {
                     // Create a new session and process group
-                    setsid().map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+                    setsid().map_err(std::io::Error::other)?;
 
                     // Isolate namespaces
-                    unshare(CloneFlags::CLONE_NEWNS | CloneFlags::CLONE_NEWPID | CloneFlags::CLONE_NEWUTS | CloneFlags::CLONE_NEWIPC)
-                        .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+                    unshare(
+                        CloneFlags::CLONE_NEWNS
+                            | CloneFlags::CLONE_NEWPID
+                            | CloneFlags::CLONE_NEWUTS
+                            | CloneFlags::CLONE_NEWIPC,
+                    )
+                    .map_err(std::io::Error::other)?;
 
                     Ok(())
                 })
@@ -113,20 +126,21 @@ impl SessionManager {
 
     fn handle_request(&mut self, request: SessionRequest) -> SessionResponse {
         match request {
-            SessionRequest::CreateSession { uid, username, role, capabilities } => self.create_session(uid, username, role, capabilities),
+            SessionRequest::CreateSession {
+                uid,
+                username,
+                role,
+                capabilities,
+            } => self.create_session(uid, username, role, capabilities),
             SessionRequest::DestroySession { token } => self.destroy_session(token),
             SessionRequest::ValidateSession { token } => self.validate_session(token),
         }
     }
 }
 
-fn main() {
-    println!("[Session Manager] Starting...");
-
+fn main() -> io::Result<()> {
     let mut manager = SessionManager::new();
-    let listener = create_listener(SESSION_SOCKET_PATH).expect("Failed to create session socket");
-
-    println!("[Session Manager] Listening on {}", SESSION_SOCKET_PATH);
+    let listener = create_listener(SESSION_SOCKET_PATH)?;
 
     for stream in listener.incoming() {
         match stream {
@@ -149,13 +163,14 @@ fn main() {
                                 };
                                 let _ = client.send_envelope(&response_env);
                             }
-                        },
+                        }
                         Err(e) if e.kind() == io::ErrorKind::UnexpectedEof => break,
                         Err(_) => break,
                     }
                 }
-            },
+            }
             Err(e) => eprintln!("[Session Manager] Connection error: {}", e),
         }
     }
+    Ok(())
 }

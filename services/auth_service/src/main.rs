@@ -1,18 +1,18 @@
-use libaipc::{AipcMessage, AuthRequest, AuthResponse, create_listener, AipcClient, AipcHeader, AipcEnvelope, MessageType, AIPC_VERSION};
-use serde::{Serialize, Deserialize};
 use argon2::{
-    password_hash::{
-        rand_core::OsRng,
-        PasswordHash, PasswordHasher, PasswordVerifier, SaltString
-    },
-    Argon2
+    Argon2,
+    password_hash::{PasswordHash, PasswordHasher, PasswordVerifier, SaltString, rand_core::OsRng},
 };
+use libaipc::LogLevel;
+use libaipc::{
+    AIPC_VERSION, AipcClient, AipcEnvelope, AipcHeader, AipcMessage, AuthRequest, AuthResponse,
+    MessageType, create_listener,
+};
+use libayux::ayux_log;
+use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::fs::{self, File};
 use std::io::{self, Read, Write};
-use libayux::ayux_log;
-use libaipc::LogLevel;
 use std::path::Path;
-use std::collections::HashMap;
 
 const AUTH_DB_PATH: &str = "/root/auth/users.db";
 const AUTH_SOCKET_PATH: &str = "/run/auth.sock";
@@ -46,20 +46,68 @@ impl AuthService {
 
     fn load_db(&mut self) {
         if Path::new(AUTH_DB_PATH).exists() {
-            let mut file = File::open(AUTH_DB_PATH).expect("Failed to open auth db");
-            let mut content = String::new();
-            file.read_to_string(&mut content).expect("Failed to read auth db");
-            self.users = serde_json::from_str(&content).unwrap_or_default();
+            match File::open(AUTH_DB_PATH) {
+                Ok(mut file) => {
+                    let mut content = String::new();
+                    if let Ok(_size) = file.read_to_string(&mut content) {
+                        self.users = serde_json::from_str(&content).unwrap_or_default();
+                    } else {
+                        ayux_log(LogLevel::Error, "auth_service", "Failed to read auth db");
+                    }
+                }
+                Err(e) => {
+                    ayux_log(
+                        LogLevel::Error,
+                        "auth_service",
+                        &format!("Failed to open auth db: {}", e),
+                    );
+                }
+            }
         }
     }
 
     fn save_db(&self) {
-        let parent = Path::new(AUTH_DB_PATH).parent().unwrap();
-        fs::create_dir_all(parent).expect("Failed to create auth db directory");
+        if let Some(parent) = Path::new(AUTH_DB_PATH).parent()
+            && let Err(e) = fs::create_dir_all(parent)
+        {
+            ayux_log(
+                LogLevel::Error,
+                "auth_service",
+                &format!("Failed to create auth db directory: {}", e),
+            );
+            return;
+        }
 
-        let content = serde_json::to_string_pretty(&self.users).expect("Failed to serialize auth db");
-        let mut file = File::create(AUTH_DB_PATH).expect("Failed to create auth db");
-        file.write_all(content.as_bytes()).expect("Failed to write auth db");
+        let content = match serde_json::to_string_pretty(&self.users) {
+            Ok(c) => c,
+            Err(e) => {
+                ayux_log(
+                    LogLevel::Error,
+                    "auth_service",
+                    &format!("Failed to serialize auth db: {}", e),
+                );
+                return;
+            }
+        };
+
+        match File::create(AUTH_DB_PATH) {
+            Ok(mut file) => {
+                if let Err(e) = file.write_all(content.as_bytes()) {
+                    ayux_log(
+                        LogLevel::Error,
+                        "auth_service",
+                        &format!("Failed to write auth db: {}", e),
+                    );
+                }
+            }
+            Err(e) => {
+                ayux_log(
+                    LogLevel::Error,
+                    "auth_service",
+                    &format!("Failed to create auth db: {}", e),
+                );
+            }
+        }
     }
 
     fn validate_root_token(&self, token: &str) -> bool {
@@ -69,9 +117,17 @@ impl AuthService {
             Err(_) => return false,
         };
 
-        let res = client.request("auth_service", None, AipcMessage::Session(SessionRequest::ValidateSession { token: token.to_string() }));
+        let res = client.request(
+            "auth_service",
+            None,
+            AipcMessage::Session(SessionRequest::ValidateSession {
+                token: token.to_string(),
+            }),
+        );
         match res {
-            Ok(AipcMessage::SessionRes(libaipc::SessionResponse::Valid { username, .. })) => username == "root",
+            Ok(AipcMessage::SessionRes(libaipc::SessionResponse::Valid { username, .. })) => {
+                username == "root"
+            }
             _ => false,
         }
     }
@@ -85,9 +141,14 @@ impl AuthService {
                     }
                     let parsed_hash = match PasswordHash::new(&user.password_hash) {
                         Ok(h) => h,
-                        Err(_) => return AuthResponse::Error("Invalid password hash in DB".to_string()),
+                        Err(_) => {
+                            return AuthResponse::Error("Invalid password hash in DB".to_string());
+                        }
                     };
-                    if Argon2::default().verify_password(password.as_bytes(), &parsed_hash).is_ok() {
+                    if Argon2::default()
+                        .verify_password(password.as_bytes(), &parsed_hash)
+                        .is_ok()
+                    {
                         AuthResponse::Authenticated {
                             uid: user.uid,
                             username: user.username.clone(),
@@ -95,22 +156,33 @@ impl AuthService {
                             capabilities: user.capabilities.clone(),
                         }
                     } else {
-                        AuthResponse::Error("Invalid password".to_string())
+                        AuthResponse::Error("Invalid username or password.".to_string())
                     }
                 } else {
                     AuthResponse::Error("User not found".to_string())
                 }
-            },
-            AuthRequest::ChangePassword { username, old_password, new_password } => {
-                 if let Some(user) = self.users.get_mut(&username) {
+            }
+            AuthRequest::ChangePassword {
+                username,
+                old_password,
+                new_password,
+            } => {
+                if let Some(user) = self.users.get_mut(&username) {
                     let parsed_hash = match PasswordHash::new(&user.password_hash) {
                         Ok(h) => h,
-                        Err(_) => return AuthResponse::Error("Invalid password hash in DB".to_string()),
+                        Err(_) => {
+                            return AuthResponse::Error("Invalid password hash in DB".to_string());
+                        }
                     };
-                    if Argon2::default().verify_password(old_password.as_bytes(), &parsed_hash).is_ok() {
+                    if Argon2::default()
+                        .verify_password(old_password.as_bytes(), &parsed_hash)
+                        .is_ok()
+                    {
                         let salt = SaltString::generate(&mut OsRng);
-                        user.password_hash = Argon2::default().hash_password(new_password.as_bytes(), &salt)
-                            .expect("Failed to hash password").to_string();
+                        user.password_hash = Argon2::default()
+                            .hash_password(new_password.as_bytes(), &salt)
+                            .map(|h| h.to_string())
+                            .unwrap_or_else(|_| user.password_hash.clone());
                         self.save_db();
                         AuthResponse::Success
                     } else {
@@ -119,8 +191,13 @@ impl AuthService {
                 } else {
                     AuthResponse::Error("User not found".to_string())
                 }
-            },
-            AuthRequest::CreateUser { username, password, display_name, role } => {
+            }
+            AuthRequest::CreateUser {
+                username,
+                password,
+                display_name,
+                role,
+            } => {
                 // Allow creating the first user (Administrator) without a session token
                 if !self.users.is_empty() {
                     let token = match &header.session_id {
@@ -143,12 +220,24 @@ impl AuthService {
                 };
 
                 let salt = SaltString::generate(&mut OsRng);
-                let password_hash = Argon2::default().hash_password(password.as_bytes(), &salt)
-                    .expect("Failed to hash password").to_string();
+                let password_hash =
+                    match Argon2::default().hash_password(password.as_bytes(), &salt) {
+                        Ok(h) => h.to_string(),
+                        Err(e) => {
+                            return AuthResponse::Error(format!("Failed to hash password: {}", e));
+                        }
+                    };
 
                 let home_dir = format!("/users/{}", username);
                 let capabilities = if role == "Administrator" {
-                    vec!["FsRead".to_string(), "FsWrite".to_string(), "NetworkManage".to_string(), "ServiceManage".to_string(), "Admin".to_string(), "DeviceAccess".to_string()]
+                    vec![
+                        "FsRead".to_string(),
+                        "FsWrite".to_string(),
+                        "NetworkManage".to_string(),
+                        "ServiceManage".to_string(),
+                        "Admin".to_string(),
+                        "DeviceAccess".to_string(),
+                    ]
                 } else {
                     vec!["FsRead".to_string(), "FsWrite".to_string()]
                 };
@@ -170,11 +259,15 @@ impl AuthService {
                     return AuthResponse::Error(format!("Failed to create home directory: {}", e));
                 }
 
-                ayux_log(LogLevel::Info, "auth_service", &format!("User created: {}", username));
+                ayux_log(
+                    LogLevel::Info,
+                    "auth_service",
+                    &format!("User created: {}", username),
+                );
                 self.users.insert(username, user);
                 self.save_db();
                 AuthResponse::Success
-            },
+            }
             AuthRequest::DeleteUser { username } => {
                 let token = match &header.session_id {
                     Some(t) => t,
@@ -189,7 +282,7 @@ impl AuthService {
                 } else {
                     AuthResponse::Error("User not found".to_string())
                 }
-            },
+            }
             AuthRequest::ListUsers => {
                 let token = match &header.session_id {
                     Some(t) => t,
@@ -200,16 +293,22 @@ impl AuthService {
                 }
                 let usernames = self.users.keys().cloned().collect();
                 AuthResponse::UserList(usernames)
-            },
-            AuthRequest::CountUsers => {
-                AuthResponse::UserCount(self.users.len())
             }
+            AuthRequest::CountUsers => AuthResponse::UserCount(self.users.len()),
         }
     }
 
     fn create_home_dir(&self, path: &str) -> io::Result<()> {
         fs::create_dir_all(path)?;
-        let subdirs = ["Desktop", "Documents", "Downloads", "Pictures", "Music", "Videos", "Config"];
+        let subdirs = [
+            "Desktop",
+            "Documents",
+            "Downloads",
+            "Pictures",
+            "Music",
+            "Videos",
+            "Config",
+        ];
         for subdir in &subdirs {
             fs::create_dir_all(format!("{}/{}", path, subdir))?;
         }
@@ -217,13 +316,9 @@ impl AuthService {
     }
 }
 
-fn main() {
-    println!("[Auth Service] Starting...");
-
+fn main() -> io::Result<()> {
     let mut service = AuthService::new();
-    let listener = create_listener(AUTH_SOCKET_PATH).expect("Failed to create auth socket");
-
-    println!("[Auth Service] Listening on {}", AUTH_SOCKET_PATH);
+    let listener = create_listener(AUTH_SOCKET_PATH)?;
 
     for stream in listener.incoming() {
         match stream {
@@ -246,13 +341,14 @@ fn main() {
                                 };
                                 let _ = client.send_envelope(&response_env);
                             }
-                        },
+                        }
                         Err(e) if e.kind() == io::ErrorKind::UnexpectedEof => break,
                         Err(_) => break,
                     }
                 }
-            },
+            }
             Err(e) => eprintln!("[Auth Service] Connection error: {}", e),
         }
     }
+    Ok(())
 }
