@@ -1,8 +1,8 @@
 #[cfg(test)]
 mod tests {
-    use libaipc::{AipcMessage, AipcEnvelope, AipcHeader, MessageType, AIPC_VERSION, AuthRequest};
+    use libaipc::{AIPC_VERSION, AipcEnvelope, AipcHeader, AipcMessage, AuthRequest, MessageType};
     use libayux_hal::clock::{Clock, LinuxClock};
-    use libayux_hal::random::{Random, LinuxRandom};
+    use libayux_hal::random::{LinuxRandom, Random};
 
     #[test]
     fn test_aipc_serialization() {
@@ -42,8 +42,8 @@ mod tests {
         let rnd = LinuxRandom;
         let mut buf = [0u8; 16];
         // Note: this might fail if /dev/urandom is not available in the test environment
-        if let Ok(_) = rnd.get_random(&mut buf) {
-             assert_ne!(buf, [0u8; 16]);
+        if rnd.get_random(&mut buf).is_ok() {
+            assert_ne!(buf, [0u8; 16]);
         }
     }
 }

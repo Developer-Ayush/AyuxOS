@@ -3,14 +3,11 @@
 
 #[cfg(test)]
 mod tests {
-    use libaipc::{AipcMessage, AuthRequest};
     use argon2::{
-        password_hash::{
-            rand_core::OsRng,
-            PasswordHasher, SaltString
-        },
-        Argon2
+        Argon2,
+        password_hash::{PasswordHasher, SaltString, rand_core::OsRng},
     };
+    use libaipc::{AipcMessage, AuthRequest};
 
     // Since running the actual binaries as sub-processes is complex in this environment,
     // we will test the logic by mocking the AIPC calls or testing service functions directly if they were decoupled.
@@ -37,13 +34,20 @@ mod tests {
         let password = "ayuxos_password";
         let salt = SaltString::generate(&mut OsRng);
         let argon2 = Argon2::default();
-        let password_hash = argon2.hash_password(password.as_bytes(), &salt).unwrap().to_string();
+        let password_hash = argon2
+            .hash_password(password.as_bytes(), &salt)
+            .unwrap()
+            .to_string();
 
-        use argon2::password_hash::PasswordHash;
         use argon2::PasswordVerifier;
+        use argon2::password_hash::PasswordHash;
 
         let parsed_hash = PasswordHash::new(&password_hash).unwrap();
-        assert!(Argon2::default().verify_password(password.as_bytes(), &parsed_hash).is_ok());
+        assert!(
+            Argon2::default()
+                .verify_password(password.as_bytes(), &parsed_hash)
+                .is_ok()
+        );
     }
 
     #[test]
@@ -53,11 +57,14 @@ mod tests {
         let path = "/users/ayux/data/file.txt";
         let user_home = format!("/users/{}", username);
 
-        let allowed = (path.starts_with(&user_home) || path.starts_with("/tmp")) && !path.contains("..");
+        let allowed =
+            (path.starts_with(&user_home) || path.starts_with("/tmp")) && !path.contains("..");
         assert!(allowed);
 
         let forbidden_path = "/root/secret.txt";
-        let allowed_forbidden = (forbidden_path.starts_with(&user_home) || forbidden_path.starts_with("/tmp")) && !forbidden_path.contains("..");
+        let allowed_forbidden = (forbidden_path.starts_with(&user_home)
+            || forbidden_path.starts_with("/tmp"))
+            && !forbidden_path.contains("..");
         assert!(!allowed_forbidden);
     }
 }

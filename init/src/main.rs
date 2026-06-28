@@ -1,11 +1,10 @@
-use libayux;
-use std::process::{Command, Child};
+use serde::Deserialize;
+use std::collections::HashMap;
+use std::fs;
+use std::path::Path;
+use std::process::{Child, Command};
 use std::thread;
 use std::time::Duration;
-use serde::Deserialize;
-use std::fs;
-use std::collections::HashMap;
-use std::path::Path;
 
 #[derive(Deserialize, Debug)]
 struct ServiceConfig {
@@ -29,7 +28,11 @@ struct ServiceInfo {
 }
 
 fn main() {
-    println!("--- AyuxOS Starting (Milestone 3) ---");
+    println!("========================================");
+    println!("AyuxOS");
+    println!("Snow Leopard Release");
+    println!("====================");
+    println!("\nAyuxOS Booting...\n");
 
     if let Err(e) = libayux::mount_basic_filesystems() {
         eprintln!("[Ayux Init] ERROR: Failed to mount filesystems: {}", e);
@@ -39,7 +42,10 @@ fn main() {
 
     let config_path = "/etc/ayux_services.toml";
     let config_str = fs::read_to_string(config_path).unwrap_or_else(|_| {
-        eprintln!("[Ayux Init] ERROR: Could not read {}, using hardcoded fallback", config_path);
+        eprintln!(
+            "[Ayux Init] ERROR: Could not read {}, using hardcoded fallback",
+            config_path
+        );
         r#"
         [services.log_service]
         path = "/bin/log_service"
@@ -75,34 +81,54 @@ fn main() {
         restart_policy = "always"
         priority = 3
         health_check_socket = "/run/network.sock"
-        "#.to_string()
+        "#
+        .to_string()
     });
 
     let config: Config = toml::from_str(&config_str).expect("Failed to parse service config");
 
-    let mut services: HashMap<String, ServiceInfo> = config.services.into_iter().map(|(name, cfg)| {
-        (name, ServiceInfo { config: cfg, child: None, consecutive_failures: 0 })
-    }).collect();
+    let mut services: HashMap<String, ServiceInfo> = config
+        .services
+        .into_iter()
+        .map(|(name, cfg)| {
+            (
+                name,
+                ServiceInfo {
+                    config: cfg,
+                    child: None,
+                    consecutive_failures: 0,
+                },
+            )
+        })
+        .collect();
 
     // Startup based on priority
     let mut to_start: Vec<String> = services.keys().cloned().collect();
     to_start.sort_by_key(|name| services[name].config.priority);
 
-    println!("[Ayux Init] Starting System Services...");
-
     for name in to_start {
-        println!("[Ayux Init] Starting {}...", name);
+        let display_name = match name.as_str() {
+            "log_service" => "Log Service",
+            "auth_service" => "Authentication Service",
+            "session_manager" => "Session Manager",
+            "security_manager" => "Security Manager",
+            "network_manager" => "Network Manager",
+            _ => &name,
+        };
+        println!(" • Starting {}", display_name);
         let path = services[&name].config.path.clone();
         match Command::new(&path).spawn() {
             Ok(child) => {
-                services.get_mut(&name).unwrap().child = Some(child);
-            },
+                if let Some(info) = services.get_mut(&name) {
+                    info.child = Some(child);
+                }
+            }
             Err(e) => eprintln!("[Ayux Init] Failed to start {}: {}", name, e),
         }
-        thread::sleep(Duration::from_millis(500));
+        thread::sleep(Duration::from_millis(300));
     }
 
-    println!("[Ayux Init] Starting Login Manager...");
+    println!(" • Starting Login Manager");
     let mut login_manager: Option<Child> = None;
 
     loop {
@@ -113,16 +139,22 @@ fn main() {
             if let Some(child) = info.child.as_mut() {
                 match child.try_wait() {
                     Ok(Some(status)) => {
-                        println!("[Ayux Init] Service {} exited with status: {}.", name, status);
+                        println!(
+                            "[Ayux Init] Service {} exited with status: {}.",
+                            name, status
+                        );
                         restart_needed = true;
-                    },
+                    }
                     Ok(None) => {
                         // Check health if specified
                         if let Some(socket_path) = &info.config.health_check_socket {
                             if !Path::new(socket_path).exists() {
                                 info.consecutive_failures += 1;
                                 if info.consecutive_failures >= 5 {
-                                    println!("[Ayux Init] Service {} is unhealthy (socket {} missing). Killing and restarting...", name, socket_path);
+                                    println!(
+                                        "[Ayux Init] Service {} is unhealthy (socket {} missing). Killing and restarting...",
+                                        name, socket_path
+                                    );
                                     let _ = child.kill();
                                     restart_needed = true;
                                     info.consecutive_failures = 0;
@@ -131,7 +163,7 @@ fn main() {
                                 info.consecutive_failures = 0;
                             }
                         }
-                    },
+                    }
                     Err(e) => eprintln!("[Ayux Init] Error monitoring {}: {}", name, e),
                 }
             } else {
@@ -149,23 +181,25 @@ fn main() {
 
         // Manage Login Manager
         let login_manager_needs_start = match login_manager.as_mut() {
-            Some(child) => {
-                match child.try_wait() {
-                    Ok(Some(status)) => {
-                        println!("[Ayux Init] Login manager exited with status: {}. Restarting...", status);
-                        true
-                    },
-                    Ok(None) => false,
-                    Err(e) => {
-                        eprintln!("[Ayux Init] Error monitoring login manager: {}", e);
-                        true
-                    }
+            Some(child) => match child.try_wait() {
+                Ok(Some(status)) => {
+                    println!(
+                        "[Ayux Init] Login manager exited with status: {}. Restarting...",
+                        status
+                    );
+                    true
+                }
+                Ok(None) => false,
+                Err(e) => {
+                    eprintln!("[Ayux Init] Error monitoring login manager: {}", e);
+                    true
                 }
             },
             None => true,
         };
 
         if login_manager_needs_start {
+            println!("\nSystem Ready.\n");
             match Command::new("/bin/login_manager").spawn() {
                 Ok(child) => login_manager = Some(child),
                 Err(e) => eprintln!("[Ayux Init] Failed to start login manager: {}", e),

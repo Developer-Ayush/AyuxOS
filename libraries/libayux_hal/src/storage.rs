@@ -27,13 +27,15 @@ impl Storage for LinuxStorage {
                 let size = fs::read_to_string(size_path)
                     .ok()
                     .and_then(|s| s.trim().parse::<u64>().ok())
-                    .unwrap_or(0) * 512;
+                    .unwrap_or(0)
+                    * 512;
 
                 let removable_path = entry.path().join("removable");
                 let removable = fs::read_to_string(removable_path)
                     .ok()
                     .and_then(|s| s.trim().parse::<u8>().ok())
-                    .unwrap_or(0) == 1;
+                    .unwrap_or(0)
+                    == 1;
 
                 devices.push(StorageDevice {
                     name,
