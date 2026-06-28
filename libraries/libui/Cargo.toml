@@ -1,0 +1,11 @@
+[package]
+name = "libui"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+libgraphics = { path = "../libgraphics" }
+libayux = { path = "../libayux" }
+libaipc = { path = "../libaipc" }
+serde = { version = "1.0", features = ["derive"] }
+rand = "0.8"

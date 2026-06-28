@@ -1,3 +1,5 @@
+pub mod shm;
+
 use libaipc::{AipcClient, AipcMessage, LogLevel, LogRequest};
 use nix::mount::{MsFlags, mount};
 use std::fs;
@@ -21,20 +23,18 @@ pub fn ayux_log(level: LogLevel, module: &str, message: &str) {
             header: libaipc::AipcHeader {
                 version: libaipc::AIPC_VERSION,
                 message_type: libaipc::MessageType::Request,
-                sender: "unknown".to_string(), // In a real app, this would be set correctly
+                sender: "unknown".to_string(),
                 session_id: None,
                 correlation_id: 0,
             },
             message: msg,
         });
     } else {
-        // Fallback to stderr if log service is unavailable
         eprintln!("[{}] [{:?}] [{}] {}", ts, level, module, message);
     }
 }
 
 pub fn mount_basic_filesystems() -> io::Result<()> {
-    // Quiet mount
     fs::create_dir_all("/proc")?;
     fs::create_dir_all("/sys")?;
     fs::create_dir_all("/dev")?;
@@ -66,6 +66,10 @@ pub fn mount_basic_filesystems() -> io::Result<()> {
         "tmpfs",
         MsFlags::MS_NOSUID | MsFlags::MS_NODEV,
     )?;
+
+    // shm filesystem
+    fs::create_dir_all("/dev/shm")?;
+    mount_fs("tmpfs", "/dev/shm", "tmpfs", MsFlags::MS_NOSUID | MsFlags::MS_NODEV)?;
 
     fs::create_dir_all("/ayux")?;
     fs::create_dir_all("/root")?;

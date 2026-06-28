@@ -1,0 +1,11 @@
+[package]
+name = "terminal_emulator"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+libui = { path = "../../libraries/libui" }
+libgraphics = { path = "../../libraries/libgraphics" }
+libayux = { path = "../../libraries/libayux" }
+libaipc = { path = "../../libraries/libaipc" }
+nix = "0.26"

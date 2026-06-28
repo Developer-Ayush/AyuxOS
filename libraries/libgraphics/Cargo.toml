@@ -1,0 +1,10 @@
+[package]
+name = "libgraphics"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+fontdue = "0.7"
+image = { version = "0.24", default-features = false, features = ["png", "jpeg"] }
+serde = { version = "1.0", features = ["derive"] }
+libayux_hal = { path = "../libayux_hal" }

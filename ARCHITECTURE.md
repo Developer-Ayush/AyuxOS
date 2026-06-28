@@ -3,78 +3,55 @@
 ## 1. Introduction
 AyuxOS is a security-first mobile operating system built on the Linux kernel. It focuses on maximum security, user freedom, and performance with a minimal footprint.
 
-### Snow Leopard Release (Final Polish)
-The Snow Leopard release focuses on stability, polish, and a professional command-line experience. Key improvements include:
-- **Refined Boot Experience**: Quiet boot with professional status progress and 40-character standardized headers.
-- **Polished CLI**: Standardized banners, spacing, and formatting across all system screens (Setup, Login, Shell) using centralized `libayux` utilities.
-- **Robust IPC**: Enhanced AIPC with graceful handling of `BrokenPipe` and `ConnectionReset` errors.
-- **Username Policy**: Strict enforcement of lowercase, alphanumeric, underscore, and hyphen characters for usernames.
-- **Professional Error Handling**: Meaningful user-facing error messages and silent, transparent logging of implementation details.
-- **Stability**: Elimination of many `unwrap()` and `expect()` calls, and zero compiler warnings (Clippy/Fmt).
+### Milestone 4: Graphics Stack & UI Foundation
+The objective of this milestone is to build the graphics infrastructure that every future graphical component will rely on.
+Key features:
+- **Graphics HAL**: Enhanced to support Linux framebuffer and evdev input.
+- **libgraphics**: A software rendering library for pixels, lines, shapes, and alpha blending.
+- **Window Server & Compositor**: Manages window lifecycles and aggregates surfaces into the final display.
+- **libui**: A widget-based UI toolkit with support for themes and layout.
+- **Graphical Login Manager**: A replacement for the terminal login with a GUI.
+- **Desktop Foundation**: The first AyuxOS desktop with wallpaper and taskbar.
 
 ## 2. High-Level Architecture
 AyuxOS follows a layered architecture with strict boundary enforcement:
 
 1.  **Hardware Layer**: Physical mobile hardware (ARM64 target, x86_64 for development).
 2.  **Kernel Layer**: Linux 6.12 LTS with AyuxOS-specific security configurations and drivers.
-3.  **Hardware Abstraction Layer (HAL)**: Unified interface for system services to interact with hardware.
-4.  **System Services Layer**: Core services (Init, Security Manager, IPC, Display Compositor, Network Manager).
-5.  **AyuxOS Framework**: Native API for application development.
-6.  **Application Layer**: System apps and User sandboxed apps.
+3.  **Graphics HAL**: Unified interface for the graphics subsystem (Display, Input).
+4.  **System Services Layer**: Core services (Init, Security Manager, IPC, Window Server, Compositor).
+5.  **AyuxOS Framework / libui**: Native API for graphical application development.
+6.  **Application Layer**: System apps (Login Manager, Desktop, Terminal) and User apps.
 
-## 3. Security Model
+## 3. Graphics Pipeline
+AyuxOS uses a modern, modular rendering pipeline:
+1. **Application**: Uses `libui` to define the interface.
+2. **libui**: Renders widgets into a **Shared Memory Surface**.
+3. **Window Server**: Receives window events and manages window state via AIPC.
+4. **Compositor**: Aggregates all window surfaces into a double-buffered framebuffer.
+5. **Graphics HAL**: Provides access to the physical framebuffer device.
 
-### 3.1. Entity Hierarchy
--   **The System**: The trusted core. Owns the kernel, base OS, and system apps. Immutable at runtime. Located at `/ayux`.
--   **Administrator**: Restricted system manager. Can manage users, updates, and hardware. Cannot access user data or modify the `/ayux` core. Workspace at `/root`.
--   **User**: Individual account with a fully isolated sandbox. Complete control within the sandbox, zero access outside. Home directory at `/users/<internal-uuid>`.
+## 4. Security Model
+The security model remains focused on tri-level hierarchy: `/ayux` (Immutable OS), `/root` (Isolated Admin), and `/users` (User Data). Window isolation is enforced by the Window Server, ensuring applications can only access their own surfaces.
 
-### 3.2. Security Mechanisms
--   **Verified Boot**: Uses `dm-verity` to ensure integrity of the system partition. Digital signatures are verified at every stage.
--   **Identity Privacy**: User IDs are never stored in plaintext. They are hashed using HMAC-SHA256 with a unique system secret.
--   **Internal Identifiers**: All internal system references use cryptographically random UUIDs rather than User IDs.
--   **File-Based Encryption (FBE)**: Each user's data is intended to be encrypted using `fscrypt` with a key derived from their credentials.
--   **Sandboxing**: Uses Linux namespaces (PID, Mount, Network, UTS, IPC) and Cgroups to isolate user processes.
--   **Mandatory Access Control (MAC)**: AyuxOS custom policy enforced via the Security Manager to protect boundaries.
+## 5. Subsystems
 
-## 4. Subsystems
+### 5.1. Window Server
+Dedicated service responsible for:
+- Window lifecycle management (Create/Destroy).
+- Input routing and focus management.
+- Synchronization between clients and the compositor.
 
-### 4.1. Ayux Init
-Custom PID 1 responsible for:
--   Bootstrapping the system and mounting encrypted partitions.
--   Starting core system services in the correct order.
--   Managing service lifecycles and recovery.
+### 5.2. libgraphics
+Software rendering engine implementing:
+- Pixel manipulation and alpha blending.
+- Geometry drawing (Lines, Rectangles, Circles).
+- Clipping and Layers.
+- Font rendering placeholder (intended for fontdue).
+- Image loading placeholder (intended for image crate).
 
-### 4.2. Ayux IPC (AIPC)
-A capability-based asynchronous message-passing system.
--   **Transport**: Unix Domain Sockets.
--   **Permissions**: Capability tokens passed via `SCM_RIGHTS`.
--   **Language**: Rust for safety and performance.
-
-### 4.3. Ayux Display Compositor (ADC)
-Custom mobile-optimized compositor.
--   **Protocol**: Minimalist Ayux-specific protocol (inspired by Wayland but simplified).
--   **Focus**: Low RAM usage and smooth 60fps animations.
-
-### 4.4. Ayux HAL
--   Provides a stable C/Rust API.
--   Abstracts Linux-specific interfaces (sysfs, ioctl, etc.).
--   Ensures OS portability across different kernel versions and hardware.
-
-## 5. Filesystem Layout (Runtime)
--   `/ayux/`: Immutable system components (Kernel, Base OS, Libraries, Security Secret). Read-only during normal operation.
--   `/root/`: Device administrator workspace (documents, logs, recovery info). Isolated from users.
--   `/users/`: Encrypted user sandboxes.
-    -   `/users/<internal-uuid>/`: Private user data. The mapping between User ID and UUID is internal.
-
-## 6. Compatibility Strategy
-Modular translation layers:
-1.  **Native**: Direct execution via AyuxOS Framework.
-2.  **Linux**: Minimal syscall translation/mapping.
-3.  **Android**: Runtime environment (ART-based) inside a container.
-4.  **Windows/Apple**: Long-term milestones using binary translation and API mapping.
-
-## 7. Build and Verification
--   **Build System**: `make` and `cargo`.
--   **Target**: Bootable QEMU image (raw or qcow2).
--   **Verification**: Automated testing suite for IPC, Security boundaries, and HAL consistency.
+### 5.3. libui
+Widget toolkit providing:
+- Base Widget trait and event system.
+- Standard widgets: Label, Button, Panel, etc.
+- Theme engine for consistent look and feel.
