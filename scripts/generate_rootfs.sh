@@ -1,42 +1,75 @@
 #!/bin/bash
 set -e
 
-BUILD_DIR=$1
-REPO_ROOT=$2
-TARGET_ARCH="x86_64-unknown-linux-musl"
+BUILD_DIR="$1"
+REPO_ROOT="$2"
+
+# Build target (defaults to production musl)
+TARGET_ARCH="${TARGET:-x86_64-unknown-linux-musl}"
+TARGET_DIR="${REPO_ROOT}/target/${TARGET_ARCH}/release"
 
 ROOTFS_DIR="${BUILD_DIR}/rootfs"
 
 echo "Assembling rootfs in ${ROOTFS_DIR}..."
+echo "Using target: ${TARGET_ARCH}"
 
 rm -rf "${ROOTFS_DIR}"
 mkdir -p "${ROOTFS_DIR}"
 cd "${ROOTFS_DIR}"
 
-# Create directory structure
-mkdir -p bin sbin etc proc sys dev run tmp root home var/log main users
-mkdir -p usr/bin usr/sbin
+# Directory structure
+mkdir -p \
+    bin \
+    sbin \
+    etc \
+    proc \
+    sys \
+    dev \
+    run \
+    tmp \
+    root \
+    home \
+    var/log \
+    main \
+    users \
+    usr/bin \
+    usr/sbin
+
+# Verify binaries exist
+for BIN in \
+    ayux_init \
+    login_manager \
+    ayux_shell \
+    auth_service \
+    session_manager \
+    security_manager
+do
+    if [ ! -f "${TARGET_DIR}/${BIN}" ]; then
+        echo "ERROR: Missing binary: ${TARGET_DIR}/${BIN}"
+        exit 1
+    fi
+done
 
 # Copy binaries
-cp "${REPO_ROOT}/target/${TARGET_ARCH}/release/ayux_init" ./init
-cp "${REPO_ROOT}/target/${TARGET_ARCH}/release/login_manager" ./bin/
-cp "${REPO_ROOT}/target/${TARGET_ARCH}/release/ayux_shell" ./bin/
-cp "${REPO_ROOT}/target/${TARGET_ARCH}/release/auth_service" ./bin/
-cp "${REPO_ROOT}/target/${TARGET_ARCH}/release/session_manager" ./bin/
-cp "${REPO_ROOT}/target/${TARGET_ARCH}/release/security_manager" ./bin/
+install -m 755 "${TARGET_DIR}/ayux_init" ./init
+install -m 755 "${TARGET_DIR}/login_manager" ./bin/
+install -m 755 "${TARGET_DIR}/ayux_shell" ./bin/
+install -m 755 "${TARGET_DIR}/auth_service" ./bin/
+install -m 755 "${TARGET_DIR}/session_manager" ./bin/
+install -m 755 "${TARGET_DIR}/security_manager" ./bin/
 
-# Ensure init is executable
-chmod +x ./init
+# Basic system files
+cat > etc/passwd <<EOF
+root:x:0:0:root:/root:/bin/ayux_shell
+EOF
 
-# Create some basic files
-# Milestone 2 uses its own auth database, but we keep etc/passwd for compatibility if needed
-echo "root:x:0:0:root:/root:/bin/ayux_shell" > etc/passwd
+cat > etc/motd <<EOF
+Welcome to AyuxOS Milestone 2 - Security & Isolation
+EOF
 
-# Create a simple welcome message
-echo "Welcome to AyuxOS Milestone 2 - Security & Isolation" > etc/motd
-
-# Pack initramfs
 echo "Packing initramfs..."
-find . | cpio -H newc -o | gzip > "${BUILD_DIR}/initramfs.cpio.gz"
+find . -print0 \
+    | cpio --null -o -H newc \
+    | gzip -9 > "${BUILD_DIR}/initramfs.cpio.gz"
 
 echo "Initramfs generated at ${BUILD_DIR}/initramfs.cpio.gz"

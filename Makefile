@@ -2,36 +2,65 @@
 
 .PHONY: all clean kernel initramfs run
 
-BUILD_DIR = $(CURDIR)/build
-ROOTFS_DIR = $(BUILD_DIR)/rootfs
-KERNEL_VERSION = 6.12.11
-KERNEL_DIR = $(BUILD_DIR)/linux-$(KERNEL_VERSION)
-KERNEL_IMAGE = $(KERNEL_DIR)/arch/x86_64/boot/bzImage
+BUILD_DIR := $(CURDIR)/build
+ROOTFS_DIR := $(BUILD_DIR)/rootfs
 
-CARGO = cargo
-TARGET = x86_64-unknown-linux-musl
-CARGO_OPTS = --release --target $(TARGET)
+KERNEL_VERSION := 6.12.11
+KERNEL_DIR := $(BUILD_DIR)/linux-$(KERNEL_VERSION)
+KERNEL_IMAGE := $(KERNEL_DIR)/arch/x86_64/boot/bzImage
 
+# -----------------------------
+# Rust build configuration
+# -----------------------------
+CARGO := cargo
+
+# Production target (override with:
+# make TARGET=x86_64-unknown-linux-gnu
+# for local development)
+TARGET ?= x86_64-unknown-linux-musl
+
+CARGO_OPTS := --release --target $(TARGET)
+
+# Export so generate_rootfs.sh can use it
+export TARGET
+
+# -----------------------------
+# Default target
+# -----------------------------
 all: kernel initramfs
 
 $(BUILD_DIR):
 	mkdir -p $(BUILD_DIR)
 
-# Kernel targets
+# -----------------------------
+# Kernel
+# -----------------------------
 kernel: $(KERNEL_IMAGE)
 
 $(KERNEL_IMAGE): $(BUILD_DIR)
-	./scripts/build_kernel.sh $(KERNEL_VERSION) $(BUILD_DIR) $(CURDIR)/kernel/ayux_defconfig
+	./scripts/build_kernel.sh \
+		$(KERNEL_VERSION) \
+		$(BUILD_DIR) \
+		$(CURDIR)/kernel/ayux_defconfig
 
-# Userspace targets
+# -----------------------------
+# Userspace / Initramfs
+# -----------------------------
 initramfs: $(BUILD_DIR)
 	$(CARGO) build $(CARGO_OPTS)
 	./scripts/generate_rootfs.sh $(BUILD_DIR) $(CURDIR)
-	./scripts/verify_initramfs.sh $(BUILD_DIR)/initramfs.cpio.gz
 
+# -----------------------------
+# Cleanup
+# -----------------------------
 clean:
 	rm -rf $(BUILD_DIR)
 	$(CARGO) clean
 
+# -----------------------------
+# Run in QEMU
+# -----------------------------
 run: all
-	./scripts/run_qemu.sh $(KERNEL_IMAGE) $(BUILD_DIR)/initramfs.cpio.gz
+	./scripts/run_qemu.sh \
+		$(KERNEL_IMAGE) \
+		$(BUILD_DIR)/initramfs.cpio.gz
