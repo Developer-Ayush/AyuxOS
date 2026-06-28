@@ -1,4 +1,5 @@
 pub mod shm;
+pub mod paths;
 
 use libaipc::{AipcClient, AipcMessage, LogLevel, LogRequest};
 use nix::mount::{MsFlags, mount};
@@ -18,7 +19,7 @@ pub fn ayux_log(level: LogLevel, module: &str, message: &str) {
         timestamp: ts,
     });
 
-    if let Ok(mut client) = AipcClient::connect("/run/log.sock") {
+    if let Ok(mut client) = AipcClient::connect(paths::LOG_SOCKET) {
         let _ = client.send_envelope(&libaipc::AipcEnvelope {
             header: libaipc::AipcHeader {
                 version: libaipc::AIPC_VERSION,
@@ -69,11 +70,51 @@ pub fn mount_basic_filesystems() -> io::Result<()> {
 
     // shm filesystem
     fs::create_dir_all("/dev/shm")?;
-    mount_fs("tmpfs", "/dev/shm", "tmpfs", MsFlags::MS_NOSUID | MsFlags::MS_NODEV)?;
+    mount_fs(
+        "tmpfs",
+        "/dev/shm",
+        "tmpfs",
+        MsFlags::MS_NOSUID | MsFlags::MS_NODEV,
+    )?;
 
-    fs::create_dir_all("/ayux")?;
-    fs::create_dir_all("/root")?;
-    fs::create_dir_all("/users")?;
+    // AyuxOS Permanent Filesystem Structure
+    fs::create_dir_all(paths::AYUX_ROOT)?;
+    fs::create_dir_all(paths::AYUX_APPS)?;
+    fs::create_dir_all(paths::AYUX_SYSTEM)?;
+    fs::create_dir_all(paths::AYUX_SERVICES)?;
+    fs::create_dir_all(paths::AYUX_SECURITY)?;
+    fs::create_dir_all(paths::AYUX_CONFIG)?;
+    fs::create_dir_all(paths::AYUX_RUNTIME)?;
+    fs::create_dir_all(paths::AYUX_THEMES)?;
+    fs::create_dir_all(paths::AYUX_CACHE)?;
+    fs::create_dir_all(paths::AYUX_LOGS)?;
+    fs::create_dir_all(paths::AYUX_UPDATES)?;
+    fs::create_dir_all(paths::AYUX_FONTS)?;
+    fs::create_dir_all(paths::AYUX_ICONS)?;
+    fs::create_dir_all(paths::AYUX_CERTIFICATES)?;
+    fs::create_dir_all(paths::AYUX_LIBRARIES)?;
+    fs::create_dir_all(paths::AYUX_MANIFESTS)?;
+    fs::create_dir_all(paths::AYUX_NATIVE)?;
+    fs::create_dir_all(paths::AYUX_MEDIA)?;
+    fs::create_dir_all(paths::AYUX_DEVICES)?;
+    fs::create_dir_all(paths::AYUX_TMP)?;
+
+    // Mount runtime and tmp as tmpfs
+    mount_fs(
+        "tmpfs",
+        paths::AYUX_RUNTIME,
+        "tmpfs",
+        MsFlags::MS_NOSUID | MsFlags::MS_NODEV,
+    )?;
+    mount_fs(
+        "tmpfs",
+        paths::AYUX_TMP,
+        "tmpfs",
+        MsFlags::MS_NOSUID | MsFlags::MS_NODEV,
+    )?;
+
+    fs::create_dir_all(paths::ROOT_ROOT)?;
+    fs::create_dir_all(paths::USERS_ROOT)?;
 
     Ok(())
 }

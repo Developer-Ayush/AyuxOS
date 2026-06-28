@@ -525,6 +525,7 @@ version = "0.1.0"
 dependencies = [
  "bincode",
  "libaipc",
+ "libayux",
  "serde",
 ]
 
@@ -613,6 +614,7 @@ version = "0.1.0"
 dependencies = [
  "bincode",
  "libaipc",
+ "libayux",
  "libayux_hal",
  "serde",
 ]
@@ -807,6 +809,7 @@ version = "0.1.0"
 dependencies = [
  "ed25519-dalek",
  "libaipc",
+ "libayux",
  "libayux_hal",
  "nix 0.31.3",
  "serde",
@@ -876,6 +879,7 @@ name = "session_manager"
 version = "0.1.0"
 dependencies = [
  "libaipc",
+ "libayux",
  "nix 0.31.3",
  "rand",
  "serde",

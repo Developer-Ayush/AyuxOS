@@ -2,6 +2,7 @@ use libaipc::{
     AipcClient, AipcEnvelope, AipcHeader, AipcMessage, MessageType,
     WindowRequest, WindowResponse, WindowEvent, InputEventData,
 };
+use libayux::paths;
 use libayux::shm::SharedMemory;
 use libayux_hal::display::{Display, LinuxFramebuffer};
 use libayux_hal::input::{InputDevice, LinuxEvdev, InputEvent};
@@ -151,7 +152,7 @@ impl WindowServer {
 }
 
 fn main() {
-    let socket_path = "/run/window_server.sock";
+    let socket_path = paths::WINDOW_SERVER_SOCKET;
     if fs::metadata(socket_path).is_ok() {
         let _ = fs::remove_file(socket_path);
     }

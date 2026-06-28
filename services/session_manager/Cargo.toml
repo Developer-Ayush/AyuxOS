@@ -9,3 +9,4 @@ serde = { version = "1.0", features = ["derive"] }
 nix = { version = "0.31.3", features = ["process", "sched", "mount", "user", "signal"] }
 rand = "0.8"
 uuid = { version = "1.0", features = ["v4"] }
+libayux = { path = "../../libraries/libayux" }
