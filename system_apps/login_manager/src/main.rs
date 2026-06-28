@@ -2,12 +2,14 @@ use libaipc::{
     AipcClient, AipcMessage, AuthRequest, AuthResponse, LogLevel, SessionRequest, SessionResponse,
 };
 use libayux::ayux_log;
-use std::io::{self, Write};
+use std::io;
 
 const AUTH_SOCKET_PATH: &str = "/run/auth.sock";
 const SESSION_SOCKET_PATH: &str = "/run/session.sock";
 
 fn main() {
+    libayux::setup_env();
+
     // Quiet start
     match get_user_count() {
         Ok(0) => {
@@ -20,18 +22,24 @@ fn main() {
     }
 
     loop {
-        print!("Username: ");
-        io::stdout().flush().unwrap();
+        println!("Username:");
         let mut username = String::new();
-        io::stdin().read_line(&mut username).unwrap();
+        if io::stdin().read_line(&mut username).is_err() {
+            continue;
+        }
         let username = username.trim();
 
         if username.is_empty() {
             continue;
         }
 
-        print!("Password: ");
-        io::stdout().flush().unwrap();
+        if let Err(e) = libayux::validate_username(username) {
+            println!("\nAuthentication failed.");
+            println!("{}\n", e);
+            continue;
+        }
+
+        println!("Password:");
         let password = read_password();
 
         match authenticate(username, &password) {
@@ -41,6 +49,8 @@ fn main() {
                     "login_manager",
                     &format!("Login success: {}", uname),
                 );
+                // Clear screen for a fresh session
+                print!("\x1B[2J\x1B[1;1H");
                 println!("\nWelcome, {}!\n", uname);
                 match create_session(uid, uname, role, caps) {
                     Ok(token) => {
@@ -80,30 +90,33 @@ fn get_user_count() -> Result<usize, String> {
 }
 
 fn run_setup_wizard() {
-    println!("\n========================================");
-    println!("AyuxOS Setup");
-    println!("====================");
+    libayux::print_heading("AyuxOS Setup");
     println!("No administrator account exists.");
     println!("Please create the first administrator.\n");
 
     loop {
-        let username = prompt("Username:         ");
+        let username = prompt("Username:");
         if username.is_empty() {
             continue;
         }
 
-        let display_name = prompt("Display Name:     ");
+        if let Err(e) = libayux::validate_username(&username) {
+            println!("\nError: {}\n", e);
+            continue;
+        }
+
+        let display_name = prompt("Display Name:");
         if display_name.is_empty() {
             continue;
         }
 
-        println!("Password: ");
+        println!("Password:");
         let password = read_password();
         if password.is_empty() {
             continue;
         }
 
-        println!("Confirm Password: ");
+        println!("Confirm Password:");
         let confirm_password = read_password();
         if password != confirm_password {
             println!("\nError: Passwords do not match. Please try again.\n");
@@ -122,10 +135,11 @@ fn run_setup_wizard() {
 }
 
 fn prompt(label: &str) -> String {
-    print!("{}", label);
-    io::stdout().flush().unwrap();
+    println!("{}", label);
     let mut input = String::new();
-    io::stdin().read_line(&mut input).unwrap();
+    if io::stdin().read_line(&mut input).is_err() {
+        return String::new();
+    }
     input.trim().to_string()
 }
 

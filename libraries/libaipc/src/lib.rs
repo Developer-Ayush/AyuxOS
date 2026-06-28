@@ -242,8 +242,21 @@ impl AipcClient {
     pub fn send_envelope(&mut self, envelope: &AipcEnvelope) -> io::Result<()> {
         let encoded: Vec<u8> = bincode::serialize(envelope).map_err(io::Error::other)?;
         let len = encoded.len() as u32;
-        self.stream.write_all(&len.to_le_bytes())?;
-        self.stream.write_all(&encoded)?;
+
+        if let Err(e) = self.stream.write_all(&len.to_le_bytes()) {
+            if is_disconnect(&e) {
+                return Ok(());
+            }
+            return Err(e);
+        }
+
+        if let Err(e) = self.stream.write_all(&encoded) {
+            if is_disconnect(&e) {
+                return Ok(());
+            }
+            return Err(e);
+        }
+
         Ok(())
     }
 
@@ -257,6 +270,26 @@ impl AipcClient {
 
         let envelope: AipcEnvelope = bincode::deserialize(&buffer).map_err(io::Error::other)?;
         Ok(envelope)
+    }
+
+    pub fn receive_envelope_safe(&mut self) -> io::Result<Option<AipcEnvelope>> {
+        let mut len_buf = [0u8; 4];
+        match self.stream.read_exact(&mut len_buf) {
+            Ok(_) => {}
+            Err(e) if is_disconnect(&e) => return Ok(None),
+            Err(e) => return Err(e),
+        }
+        let len = u32::from_le_bytes(len_buf) as usize;
+
+        let mut buffer = vec![0u8; len];
+        match self.stream.read_exact(&mut buffer) {
+            Ok(_) => {}
+            Err(e) if is_disconnect(&e) => return Ok(None),
+            Err(e) => return Err(e),
+        }
+
+        let envelope: AipcEnvelope = bincode::deserialize(&buffer).map_err(io::Error::other)?;
+        Ok(Some(envelope))
     }
 
     pub fn request(
@@ -293,4 +326,11 @@ pub fn create_listener<P: AsRef<Path>>(path: P) -> io::Result<UnixListener> {
         std::fs::remove_file(path.as_ref())?;
     }
     UnixListener::bind(path)
+}
+
+pub fn is_disconnect(e: &io::Error) -> bool {
+    matches!(
+        e.kind(),
+        io::ErrorKind::BrokenPipe | io::ErrorKind::ConnectionReset | io::ErrorKind::UnexpectedEof
+    )
 }

@@ -38,14 +38,12 @@ impl Shell {
             &format!("Shell started for user: {}", self.username),
         );
 
-        println!("========================================");
-        println!("Ayux Shell");
-        println!("====================");
-        println!("Logged in as: {}", self.username);
+        libayux::print_heading("Ayux Shell");
         println!("Type 'help' for available commands.\n");
 
         loop {
-            print!("{}@ayux:{}$ ", self.username, self.cwd);
+            let hostname = libayux::get_hostname();
+            print!("{}@{}:{}$ ", self.username, hostname, self.cwd);
             io::stdout().flush().ok();
 
             let mut input = String::new();
@@ -123,6 +121,7 @@ impl Shell {
                 }
                 cmd => {
                     println!("Unknown command: '{}'", cmd);
+                    println!("Type 'help' to see available commands.");
                     self.suggest_command(cmd);
                 }
             }
@@ -130,23 +129,23 @@ impl Shell {
     }
 
     fn print_help(&self) {
-        println!("\nAyux Shell Commands:");
-        println!("  help            Display this help message");
-        println!("  exit, logout    End the current session");
-        println!("  pwd             Print current working directory");
-        println!("  cd <dir>        Change current working directory");
-        println!("  ls [path]       List directory contents");
-        println!("  cat <file>      Display file contents");
-        println!("  mkdir <dir>     Create a new directory");
-        println!("  touch <file>    Create a new empty file");
-        println!("  echo [text]     Display a line of text");
-        println!("  clear           Clear the terminal screen");
-        println!("  whoami          Display current user");
-        println!("  hostname        Display system hostname");
-        println!("  date            Display current system time");
-        println!("  reboot          Restart the system");
-        println!("  shutdown        Shut down the system");
-        println!("  history         Show command history\n");
+        println!("\nAvailable commands:");
+        println!("  help            - Display this help message");
+        println!("  exit, logout    - End the current session");
+        println!("  pwd             - Print current working directory");
+        println!("  cd <dir>        - Change current working directory");
+        println!("  ls [path]       - List directory contents");
+        println!("  cat <file>      - Display file contents");
+        println!("  mkdir <dir>     - Create a new directory");
+        println!("  touch <file>    - Create a new empty file");
+        println!("  echo [text]     - Display a line of text");
+        println!("  clear           - Clear the terminal screen");
+        println!("  whoami          - Display current user");
+        println!("  hostname        - Display system hostname");
+        println!("  date            - Display current system time");
+        println!("  reboot          - Restart the system");
+        println!("  shutdown        - Shut down the system");
+        println!("  history         - Show command history\n");
     }
 
     fn resolve_path(&self, path: &str) -> String {

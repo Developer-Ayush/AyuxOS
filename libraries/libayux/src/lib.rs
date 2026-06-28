@@ -85,3 +85,35 @@ pub fn setup_env() {
         std::env::set_var("TERM", "linux");
     }
 }
+
+pub fn get_hostname() -> String {
+    "ayux".to_string()
+}
+
+pub fn print_separator() {
+    println!("========================================");
+}
+
+pub fn print_heading(title: &str) {
+    print_separator();
+    println!("{}", title);
+    println!("{}", "=".repeat(title.len()));
+    println!();
+}
+
+pub fn validate_username(username: &str) -> Result<(), String> {
+    if username.is_empty() {
+        return Err("Username cannot be empty.".to_string());
+    }
+
+    for c in username.chars() {
+        if !c.is_ascii_lowercase() && !c.is_ascii_digit() && c != '_' && c != '-' {
+            return Err(
+                "Username may only contain lowercase letters, numbers, underscores, and hyphens."
+                    .to_string(),
+            );
+        }
+    }
+
+    Ok(())
+}

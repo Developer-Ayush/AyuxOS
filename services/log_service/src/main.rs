@@ -123,8 +123,8 @@ fn main() -> io::Result<()> {
             for l in reader.lines().map_while(Result::ok) {
                 let ts = SystemTime::now()
                     .duration_since(UNIX_EPOCH)
-                    .unwrap()
-                    .as_secs();
+                    .map(|d| d.as_secs())
+                    .unwrap_or(0);
                 service_clone.write_log(LogLevel::Info, "Kernel", &l, ts);
             }
         } else {
@@ -135,44 +135,33 @@ fn main() -> io::Result<()> {
     let listener = create_listener(LOG_SOCKET_PATH)?;
     println!("[Log Service] Listening on {}", LOG_SOCKET_PATH);
 
-    for stream in listener.incoming() {
-        match stream {
-            Ok(stream) => {
-                let service_clone = Arc::clone(&service);
-                thread::spawn(move || {
-                    let mut client = AipcClient::from_stream(stream);
-                    loop {
-                        match client.receive_envelope() {
-                            Ok(envelope) => {
-                                if let AipcMessage::Log(req) = envelope.message {
-                                    let res = service_clone.handle_request(req);
-                                    let response_env = AipcEnvelope {
-                                        header: AipcHeader {
-                                            version: AIPC_VERSION,
-                                            message_type: MessageType::Response,
-                                            sender: "log_service".to_string(),
-                                            session_id: None,
-                                            correlation_id: envelope.header.correlation_id,
-                                        },
-                                        message: AipcMessage::LogRes(res),
-                                    };
-                                    if let Err(e) = client.send_envelope(&response_env) {
-                                        eprintln!("[Log Service] Failed to send response: {}", e);
-                                        break;
-                                    }
-                                }
-                            }
-                            Err(e) if e.kind() == io::ErrorKind::UnexpectedEof => break,
-                            Err(e) => {
-                                eprintln!("[Log Service] IPC error: {}", e);
-                                break;
-                            }
+    for stream in listener.incoming().flatten() {
+        let service_clone = Arc::clone(&service);
+        thread::spawn(move || {
+            let mut client = AipcClient::from_stream(stream);
+            loop {
+                match client.receive_envelope_safe() {
+                    Ok(Some(envelope)) => {
+                        if let AipcMessage::Log(req) = envelope.message {
+                            let res = service_clone.handle_request(req);
+                            let response_env = AipcEnvelope {
+                                header: AipcHeader {
+                                    version: AIPC_VERSION,
+                                    message_type: MessageType::Response,
+                                    sender: "log_service".to_string(),
+                                    session_id: None,
+                                    correlation_id: envelope.header.correlation_id,
+                                },
+                                message: AipcMessage::LogRes(res),
+                            };
+                            let _ = client.send_envelope(&response_env);
                         }
                     }
-                });
+                    Ok(None) => break,
+                    Err(_) => break,
+                }
             }
-            Err(e) => eprintln!("[Log Service] Connection error: {}", e),
-        }
+        });
     }
     Ok(())
 }

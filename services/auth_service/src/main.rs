@@ -156,10 +156,10 @@ impl AuthService {
                             capabilities: user.capabilities.clone(),
                         }
                     } else {
-                        AuthResponse::Error("Invalid username or password.".to_string())
+                        AuthResponse::Error("Invalid password.".to_string())
                     }
                 } else {
-                    AuthResponse::Error("User not found".to_string())
+                    AuthResponse::Error("Unknown username.".to_string())
                 }
             }
             AuthRequest::ChangePassword {
@@ -207,6 +207,10 @@ impl AuthService {
                     if !self.validate_root_token(token) {
                         return AuthResponse::Error("Permission denied: Root only".to_string());
                     }
+                }
+
+                if let Err(e) = libayux::validate_username(&username) {
+                    return AuthResponse::Error(e);
                 }
 
                 if self.users.contains_key(&username) {
