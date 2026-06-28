@@ -5,9 +5,13 @@ members = [
     "system_apps/ayux_shell",
     "libraries/libayux",
     "libraries/libaipc",
+    "libraries/libayux_hal",
     "services/auth_service",
     "services/security_manager",
     "services/session_manager",
+    "services/log_service",
+    "services/network_manager",
     "tests/milestone2",
+    "tests/milestone3",
 ]
 resolver = "2"

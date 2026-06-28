@@ -1,6 +1,34 @@
 use nix::mount::{mount, MsFlags};
 use std::fs;
 use std::io;
+use libaipc::{AipcClient, AipcMessage, LogRequest, LogLevel};
+use std::time::{SystemTime, UNIX_EPOCH};
+
+pub fn ayux_log(level: LogLevel, module: &str, message: &str) {
+    let ts = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_secs();
+    let msg = AipcMessage::Log(LogRequest::Log {
+        level: level.clone(),
+        module: module.to_string(),
+        message: message.to_string(),
+        timestamp: ts,
+    });
+
+    if let Ok(mut client) = AipcClient::connect("/run/log.sock") {
+        let _ = client.send_envelope(&libaipc::AipcEnvelope {
+            header: libaipc::AipcHeader {
+                version: libaipc::AIPC_VERSION,
+                message_type: libaipc::MessageType::Request,
+                sender: "unknown".to_string(), // In a real app, this would be set correctly
+                session_id: None,
+                correlation_id: 0,
+            },
+            message: msg,
+        });
+    } else {
+        // Fallback to stderr if log service is unavailable
+        eprintln!("[{}] [{:?}] [{}] {}", ts, level, module, message);
+    }
+}
 
 pub fn mount_basic_filesystems() -> io::Result<()> {
     println!("[Ayux Init] Mounting basic filesystems...");

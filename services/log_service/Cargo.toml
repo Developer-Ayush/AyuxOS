@@ -1,9 +1,9 @@
 [package]
-name = "ayux_init"
+name = "log_service"
 version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-libayux = { version = "0.1.0", path = "../libraries/libayux" }
+libaipc = { path = "../../libraries/libaipc" }
 serde = { version = "1.0", features = ["derive"] }
-toml = "0.8"
+bincode = "1.3"

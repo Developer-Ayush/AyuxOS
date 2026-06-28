@@ -1,4 +1,4 @@
-use libaipc::{AipcMessage, SessionRequest, SessionResponse, create_listener, AipcClient};
+use libaipc::{AipcMessage, SessionRequest, SessionResponse, create_listener, AipcClient, AipcEnvelope, AipcHeader, MessageType, AIPC_VERSION};
 use std::collections::HashMap;
 use std::process::{Command, Stdio};
 use std::fs;
@@ -7,6 +7,7 @@ use std::time::Duration;
 use uuid::Uuid;
 use nix::sys::signal::{self, Signal};
 use nix::unistd::Pid;
+use std::io;
 
 const SESSION_SOCKET_PATH: &str = "/run/session.sock";
 
@@ -111,6 +112,14 @@ impl SessionManager {
             SessionResponse::Error("Invalid session".to_string())
         }
     }
+
+    fn handle_request(&mut self, request: SessionRequest) -> SessionResponse {
+        match request {
+            SessionRequest::CreateSession { uid, username } => self.create_session(uid, username),
+            SessionRequest::DestroySession { token } => self.destroy_session(token),
+            SessionRequest::ValidateSession { token } => self.validate_session(token),
+        }
+    }
 }
 
 fn main() {
@@ -125,16 +134,27 @@ fn main() {
         match stream {
             Ok(stream) => {
                 let mut client = AipcClient::from_stream(stream);
-                match client.receive_message() {
-                    Ok(AipcMessage::Session(req)) => {
-                        let res = match req {
-                            SessionRequest::CreateSession { uid, username } => manager.create_session(uid, username),
-                            SessionRequest::DestroySession { token } => manager.destroy_session(token),
-                            SessionRequest::ValidateSession { token } => manager.validate_session(token),
-                        };
-                        let _ = client.send_message(&AipcMessage::SessionRes(res));
-                    },
-                    _ => eprintln!("[Session Manager] Received invalid message"),
+                loop {
+                    match client.receive_envelope() {
+                        Ok(envelope) => {
+                            if let AipcMessage::Session(req) = envelope.message {
+                                let res = manager.handle_request(req);
+                                let response_env = AipcEnvelope {
+                                    header: AipcHeader {
+                                        version: AIPC_VERSION,
+                                        message_type: MessageType::Response,
+                                        sender: "session_manager".to_string(),
+                                        session_id: None,
+                                        correlation_id: envelope.header.correlation_id,
+                                    },
+                                    message: AipcMessage::SessionRes(res),
+                                };
+                                let _ = client.send_envelope(&response_env);
+                            }
+                        },
+                        Err(e) if e.kind() == io::ErrorKind::UnexpectedEof => break,
+                        Err(_) => break,
+                    }
                 }
             },
             Err(e) => eprintln!("[Session Manager] Connection error: {}", e),

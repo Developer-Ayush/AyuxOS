@@ -1,4 +1,4 @@
-use libaipc::{AipcMessage, AuthRequest, AuthResponse, create_listener};
+use libaipc::{AipcMessage, AuthRequest, AuthResponse, create_listener, AipcClient, AipcHeader, AipcEnvelope, MessageType, AIPC_VERSION};
 use serde::{Serialize, Deserialize};
 use argon2::{
     password_hash::{
@@ -8,7 +8,7 @@ use argon2::{
     Argon2
 };
 use std::fs::{self, File};
-use std::io::{Read, Write};
+use std::io::{self, Read, Write};
 use std::path::Path;
 use std::collections::HashMap;
 
@@ -77,20 +77,20 @@ impl AuthService {
     }
 
     fn validate_root_token(&self, token: &str) -> bool {
-        use libaipc::{AipcClient, SessionRequest, SessionResponse};
+        use libaipc::SessionRequest;
         let mut client = match AipcClient::connect(SESSION_SOCKET_PATH) {
             Ok(c) => c,
             Err(_) => return false,
         };
 
-        let _ = client.send_message(&AipcMessage::Session(SessionRequest::ValidateSession { token: token.to_string() }));
-        match client.receive_message() {
-            Ok(AipcMessage::SessionRes(SessionResponse::Valid { username, .. })) => username == "root",
+        let res = client.request("auth_service", None, AipcMessage::Session(SessionRequest::ValidateSession { token: token.to_string() }));
+        match res {
+            Ok(AipcMessage::SessionRes(libaipc::SessionResponse::Valid { username, .. })) => username == "root",
             _ => false,
         }
     }
 
-    fn handle_request(&mut self, request: AuthRequest) -> AuthResponse {
+    fn handle_request(&mut self, request: AuthRequest, header: &AipcHeader) -> AuthResponse {
         match request {
             AuthRequest::Login { username, password } => {
                 if let Some(user) = self.users.get(&username) {
@@ -120,8 +120,12 @@ impl AuthService {
                     AuthResponse::Error("User not found".to_string())
                 }
             },
-            AuthRequest::CreateUser { token, username, password } => {
-                if !self.validate_root_token(&token) {
+            AuthRequest::CreateUser { username, password } => {
+                let token = match &header.session_id {
+                    Some(t) => t,
+                    None => return AuthResponse::Error("Missing session token".to_string()),
+                };
+                if !self.validate_root_token(token) {
                     return AuthResponse::Error("Permission denied: Root only".to_string());
                 }
                 if self.users.contains_key(&username) {
@@ -143,8 +147,12 @@ impl AuthService {
                 self.save_db();
                 AuthResponse::Success
             },
-            AuthRequest::DeleteUser { token, username } => {
-                if !self.validate_root_token(&token) {
+            AuthRequest::DeleteUser { username } => {
+                let token = match &header.session_id {
+                    Some(t) => t,
+                    None => return AuthResponse::Error("Missing session token".to_string()),
+                };
+                if !self.validate_root_token(token) {
                     return AuthResponse::Error("Permission denied: Root only".to_string());
                 }
                 if username == "root" {
@@ -157,8 +165,12 @@ impl AuthService {
                     AuthResponse::Error("User not found".to_string())
                 }
             },
-            AuthRequest::ListUsers { token } => {
-                if !self.validate_root_token(&token) {
+            AuthRequest::ListUsers => {
+                let token = match &header.session_id {
+                    Some(t) => t,
+                    None => return AuthResponse::Error("Missing session token".to_string()),
+                };
+                if !self.validate_root_token(token) {
                     return AuthResponse::Error("Permission denied: Root only".to_string());
                 }
                 let usernames = self.users.keys().cloned().collect();
@@ -179,13 +191,28 @@ fn main() {
     for stream in listener.incoming() {
         match stream {
             Ok(stream) => {
-                let mut client = libaipc::AipcClient::from_stream(stream);
-                match client.receive_message() {
-                    Ok(AipcMessage::Auth(req)) => {
-                        let res = service.handle_request(req);
-                        let _ = client.send_message(&AipcMessage::AuthRes(res));
-                    },
-                    _ => eprintln!("[Auth Service] Received invalid message"),
+                let mut client = AipcClient::from_stream(stream);
+                loop {
+                    match client.receive_envelope() {
+                        Ok(envelope) => {
+                            if let AipcMessage::Auth(req) = envelope.message {
+                                let res = service.handle_request(req, &envelope.header);
+                                let response_env = AipcEnvelope {
+                                    header: AipcHeader {
+                                        version: AIPC_VERSION,
+                                        message_type: MessageType::Response,
+                                        sender: "auth_service".to_string(),
+                                        session_id: None,
+                                        correlation_id: envelope.header.correlation_id,
+                                    },
+                                    message: AipcMessage::AuthRes(res),
+                                };
+                                let _ = client.send_envelope(&response_env);
+                            }
+                        },
+                        Err(e) if e.kind() == io::ErrorKind::UnexpectedEof => break,
+                        Err(_) => break,
+                    }
                 }
             },
             Err(e) => eprintln!("[Auth Service] Connection error: {}", e),
