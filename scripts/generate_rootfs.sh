@@ -42,7 +42,9 @@ for BIN in \
     ayux_shell \
     auth_service \
     session_manager \
-    security_manager
+    security_manager \
+    log_service \
+    network_manager
 do
     if [ ! -f "${TARGET_DIR}/${BIN}" ]; then
         echo "ERROR: Missing binary: ${TARGET_DIR}/${BIN}"
@@ -57,6 +59,8 @@ install -m 755 "${TARGET_DIR}/ayux_shell" ./bin/
 install -m 755 "${TARGET_DIR}/auth_service" ./bin/
 install -m 755 "${TARGET_DIR}/session_manager" ./bin/
 install -m 755 "${TARGET_DIR}/security_manager" ./bin/
+install -m 755 "${TARGET_DIR}/log_service" ./bin/
+install -m 755 "${TARGET_DIR}/network_manager" ./bin/
 
 # Basic system files
 cat > etc/passwd <<EOF
@@ -64,7 +68,44 @@ root:x:0:0:root:/root:/bin/ayux_shell
 EOF
 
 cat > etc/motd <<EOF
-Welcome to AyuxOS Milestone 2 - Security & Isolation
+Welcome to AyuxOS Milestone 3 - HAL & Core Services
+EOF
+
+cat > etc/ayux_services.toml <<EOF
+[services.log_service]
+path = "/bin/log_service"
+dependencies = []
+restart_policy = "always"
+priority = 1
+health_check_socket = "/run/log.sock"
+
+[services.auth_service]
+path = "/bin/auth_service"
+dependencies = ["log_service"]
+restart_policy = "always"
+priority = 2
+health_check_socket = "/run/auth.sock"
+
+[services.session_manager]
+path = "/bin/session_manager"
+dependencies = ["log_service"]
+restart_policy = "always"
+priority = 2
+health_check_socket = "/run/session.sock"
+
+[services.security_manager]
+path = "/bin/security_manager"
+dependencies = ["session_manager", "log_service"]
+restart_policy = "always"
+priority = 3
+health_check_socket = "/run/security.sock"
+
+[services.network_manager]
+path = "/bin/network_manager"
+dependencies = ["log_service"]
+restart_policy = "always"
+priority = 3
+health_check_socket = "/run/network.sock"
 EOF
 
 echo "Packing initramfs..."

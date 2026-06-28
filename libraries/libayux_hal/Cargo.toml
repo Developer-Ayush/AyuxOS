@@ -1,9 +1,9 @@
 [package]
-name = "ayux_init"
+name = "libayux_hal"
 version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-libayux = { version = "0.1.0", path = "../libraries/libayux" }
+thiserror = "1.0"
+nix = { version = "0.31.3", features = ["fs", "ioctl"] }
 serde = { version = "1.0", features = ["derive"] }
-toml = "0.8"

@@ -1,77 +1,122 @@
-use libaipc::{AipcMessage, SecurityRequest, SecurityResponse, SessionRequest, SessionResponse, create_listener, AipcClient};
+use libaipc::{AipcMessage, SecurityRequest, SecurityResponse, SessionRequest, SessionResponse, create_listener, AipcClient, AipcEnvelope, AipcHeader, MessageType, AIPC_VERSION};
 use std::fs::{self, File};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
+use serde::{Serialize, Deserialize};
+use std::collections::{HashMap, HashSet};
+use ed25519_dalek::{VerifyingKey, Signature, Verifier};
+use std::io;
 
 const SECURITY_SOCKET_PATH: &str = "/run/security.sock";
 const SESSION_SOCKET_PATH: &str = "/run/session.sock";
 
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq, Hash)]
+pub enum Capability {
+    FsRead,
+    FsWrite,
+    NetworkManage,
+    ServiceManage,
+    Admin,
+    DeviceAccess,
+}
+
 struct SecurityManager {
-    // In a real implementation, we would have a more complex policy engine
+    // Role-based access control
+    role_capabilities: HashMap<String, HashSet<Capability>>,
 }
 
 impl SecurityManager {
     fn new() -> Self {
-        Self {}
+        let mut role_capabilities = HashMap::new();
+
+        let mut root_caps = HashSet::new();
+        root_caps.insert(Capability::FsRead);
+        root_caps.insert(Capability::FsWrite);
+        root_caps.insert(Capability::NetworkManage);
+        root_caps.insert(Capability::ServiceManage);
+        root_caps.insert(Capability::Admin);
+        root_caps.insert(Capability::DeviceAccess);
+        role_capabilities.insert("root".to_string(), root_caps);
+
+        let mut user_caps = HashSet::new();
+        user_caps.insert(Capability::FsRead);
+        user_caps.insert(Capability::FsWrite);
+        role_capabilities.insert("user".to_string(), user_caps);
+
+        Self { role_capabilities }
     }
 
     fn validate_session(&self, token: &str) -> Option<(u32, String)> {
-        // Connect to Session Manager to validate token
         let mut client = AipcClient::connect(SESSION_SOCKET_PATH).ok()?;
-        client.send_message(&AipcMessage::Session(SessionRequest::ValidateSession { token: token.to_string() })).ok()?;
+        let res = client.request("security_manager", None, AipcMessage::Session(SessionRequest::ValidateSession { token: token.to_string() })).ok()?;
 
-        match client.receive_message() {
-            Ok(AipcMessage::SessionRes(SessionResponse::Valid { uid, username })) => Some((uid, username)),
+        match res {
+            AipcMessage::SessionRes(SessionResponse::Valid { uid, username }) => Some((uid, username)),
             _ => None,
         }
     }
 
-    fn is_allowed(&self, _uid: u32, username: &str, _operation: &str, path: &str) -> bool {
-        let _path_buf = PathBuf::from(path);
+    fn has_capability(&self, username: &str, cap: Capability) -> bool {
+        let role = if username == "root" { "root" } else { "user" };
+        self.role_capabilities.get(role).map(|caps| caps.contains(&cap)).unwrap_or(false)
+    }
 
-        // Root account restrictions
-        if username == "root" {
-            // Root can access /root/ and /main/
-            if path.starts_with("/root") || path.starts_with("/main") || path.starts_with("/bin") || path.starts_with("/usr") || path.starts_with("/etc") || path.starts_with("/run") || path.starts_with("/tmp") || path.starts_with("/proc") || path.starts_with("/sys") || path.starts_with("/dev") {
-                 // But Root cannot access /users/<other_user>
-                 if path.starts_with("/users/") {
-                     return false;
-                 }
-                 return true;
-            }
-            return false;
+    fn is_allowed(&self, _uid: u32, username: &str, operation: &str, path: &str) -> bool {
+        // Enforce capabilities
+        match operation {
+            "read" | "ls" => if !self.has_capability(username, Capability::FsRead) { return false; },
+            "write" | "mkdir" | "touch" => if !self.has_capability(username, Capability::FsWrite) { return false; },
+            _ => {},
         }
 
-        // Normal user restrictions
+        // Standard path-based restrictions
+        if username == "root" {
+            if path.starts_with("/users/") {
+                return false;
+            }
+            return true;
+        }
+
         let user_home = format!("/users/{}", username);
         if path.starts_with(&user_home) || path.starts_with("/tmp") || path.starts_with("/bin") || path.starts_with("/usr") || path.starts_with("/etc") || path.starts_with("/run") || path.starts_with("/proc") || path.starts_with("/sys") || path.starts_with("/dev") {
-            // Cannot escape to parent
-            if path.contains("..") {
-                return false;
-            }
-
-            // Cannot access /main, /root, or other users
-            if path.starts_with("/main") || path.starts_with("/root") {
-                return false;
-            }
-
-            if path.starts_with("/users/") && !path.starts_with(&user_home) {
-                return false;
-            }
-
+            if path.contains("..") { return false; }
+            if path.starts_with("/main") || path.starts_with("/root") { return false; }
+            if path.starts_with("/users/") && !path.starts_with(&user_home) { return false; }
             return true;
         }
 
         false
     }
 
-    fn handle_request(&self, request: SecurityRequest) -> SecurityResponse {
-        let (token, operation, path) = match &request {
-            SecurityRequest::Authorize { token, operation, path } => (token, operation.as_str(), path.as_str()),
-            SecurityRequest::FsLs { token, path } => (token, "ls", path.as_str()),
-            SecurityRequest::FsRead { token, path } => (token, "read", path.as_str()),
-            SecurityRequest::FsWrite { token, path, .. } => (token, "write", path.as_str()),
-            SecurityRequest::FsMkdir { token, path } => (token, "mkdir", path.as_str()),
-            SecurityRequest::FsTouch { token, path } => (token, "touch", path.as_str()),
+    fn verify_signature(&self, public_key_bytes: &[u8], message: &[u8], signature_bytes: &[u8]) -> bool {
+        let pk_bytes: &[u8; 32] = match public_key_bytes.try_into() {
+            Ok(b) => b,
+            Err(_) => return false,
+        };
+        let verifying_key = match VerifyingKey::from_bytes(pk_bytes) {
+            Ok(key) => key,
+            Err(_) => return false,
+        };
+        let sig_bytes: &[u8; 64] = match signature_bytes.try_into() {
+            Ok(b) => b,
+            Err(_) => return false,
+        };
+        let signature = Signature::from_bytes(sig_bytes);
+        verifying_key.verify(message, &signature).is_ok()
+    }
+
+    fn handle_request(&self, header: &AipcHeader, request: SecurityRequest) -> SecurityResponse {
+        let (operation, path) = match &request {
+            SecurityRequest::Authorize { operation, path, .. } => (operation.as_str(), path.as_str()),
+            SecurityRequest::FsLs { path, .. } => ("ls", path.as_str()),
+            SecurityRequest::FsRead { path, .. } => ("read", path.as_str()),
+            SecurityRequest::FsWrite { path, .. } => ("write", path.as_str()),
+            SecurityRequest::FsMkdir { path, .. } => ("mkdir", path.as_str()),
+            SecurityRequest::FsTouch { path, .. } => ("touch", path.as_str()),
+        };
+
+        let token = match &header.session_id {
+            Some(t) => t,
+            None => return SecurityResponse::Denied("Missing session token".to_string()),
         };
 
         let (uid, username) = match self.validate_session(token) {
@@ -134,12 +179,27 @@ fn main() {
         match stream {
             Ok(stream) => {
                 let mut client = AipcClient::from_stream(stream);
-                match client.receive_message() {
-                    Ok(AipcMessage::Security(req)) => {
-                        let res = manager.handle_request(req);
-                        let _ = client.send_message(&AipcMessage::SecurityRes(res));
-                    },
-                    _ => eprintln!("[Security Manager] Received invalid message"),
+                loop {
+                    match client.receive_envelope() {
+                        Ok(envelope) => {
+                            if let AipcMessage::Security(req) = envelope.message {
+                                let res = manager.handle_request(&envelope.header, req);
+                                let response_env = AipcEnvelope {
+                                    header: AipcHeader {
+                                        version: AIPC_VERSION,
+                                        message_type: MessageType::Response,
+                                        sender: "security_manager".to_string(),
+                                        session_id: None,
+                                        correlation_id: envelope.header.correlation_id,
+                                    },
+                                    message: AipcMessage::SecurityRes(res),
+                                };
+                                let _ = client.send_envelope(&response_env);
+                            }
+                        },
+                        Err(e) if e.kind() == io::ErrorKind::UnexpectedEof => break,
+                        Err(_) => break,
+                    }
                 }
             },
             Err(e) => eprintln!("[Security Manager] Connection error: {}", e),

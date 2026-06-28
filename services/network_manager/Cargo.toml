@@ -1,11 +1,10 @@
 [package]
-name = "security_manager"
+name = "network_manager"
 version = "0.1.0"
 edition = "2024"
 
 [dependencies]
 libaipc = { path = "../../libraries/libaipc" }
+libayux_hal = { path = "../../libraries/libayux_hal" }
 serde = { version = "1.0", features = ["derive"] }
-serde_json = "1.0"
-ed25519-dalek = "2.1"
-nix = { version = "0.31.3", features = ["fs", "user"] }
+bincode = "1.3"

@@ -6,3 +6,4 @@ edition = "2024"
 [dependencies]
 libc = "0.2.186"
 nix = { version = "0.31.3", features = ["mount"] }
+libaipc = { path = "../libaipc" }
