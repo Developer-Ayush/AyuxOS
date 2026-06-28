@@ -3,14 +3,14 @@
 ## 1. Introduction
 AyuxOS is a security-first mobile operating system built on the Linux kernel. It focuses on maximum security, user freedom, and performance with a minimal footprint.
 
-### Snow Leopard Release (Milestone 3.5)
+### Snow Leopard Release (Final Polish)
 The Snow Leopard release focuses on stability, polish, and a professional command-line experience. Key improvements include:
-- **Refined Boot Experience**: Quiet boot with professional status progress.
-- **Polished CLI**: Standardized banners, spacing, and formatting across all system screens (Setup, Login, Shell).
-- **Enhanced Shell**: Session-local history, command suggestions, and improved help system.
-- **Robust Logging**: Structured logging with log rotation and module-specific log files under `/var/log`.
-- **Stability**: Elimination of many `unwrap()` and `expect()` calls, improved IPC timeout handling, and graceful error reporting.
-- **Compiler Cleanliness**: Clean build with zero clippy warnings.
+- **Refined Boot Experience**: Quiet boot with professional status progress and 40-character standardized headers.
+- **Polished CLI**: Standardized banners, spacing, and formatting across all system screens (Setup, Login, Shell) using centralized `libayux` utilities.
+- **Robust IPC**: Enhanced AIPC with graceful handling of `BrokenPipe` and `ConnectionReset` errors.
+- **Username Policy**: Strict enforcement of lowercase, alphanumeric, underscore, and hyphen characters for usernames.
+- **Professional Error Handling**: Meaningful user-facing error messages and silent, transparent logging of implementation details.
+- **Stability**: Elimination of many `unwrap()` and `expect()` calls, and zero compiler warnings (Clippy/Fmt).
 
 ## 2. High-Level Architecture
 AyuxOS follows a layered architecture with strict boundary enforcement:

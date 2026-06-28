@@ -1,6 +1,7 @@
 use serde::Deserialize;
 use std::collections::HashMap;
 use std::fs;
+use std::io::{self, Write};
 use std::path::Path;
 use std::process::{Child, Command};
 use std::thread;
@@ -28,11 +29,8 @@ struct ServiceInfo {
 }
 
 fn main() {
-    println!("========================================");
-    println!("AyuxOS");
-    println!("Snow Leopard Release");
-    println!("====================");
-    println!("\nAyuxOS Booting...\n");
+    libayux::print_heading("AyuxOS - Snow Leopard Release");
+    println!("AyuxOS Booting...\n");
 
     if let Err(e) = libayux::mount_basic_filesystems() {
         eprintln!("[Ayux Init] ERROR: Failed to mount filesystems: {}", e);
@@ -115,20 +113,26 @@ fn main() {
             "network_manager" => "Network Manager",
             _ => &name,
         };
-        println!(" • Starting {}", display_name);
+        print!(" • Starting {:<30}", display_name);
+        io::stdout().flush().ok();
         let path = services[&name].config.path.clone();
         match Command::new(&path).spawn() {
             Ok(child) => {
                 if let Some(info) = services.get_mut(&name) {
                     info.child = Some(child);
                 }
+                println!("OK");
             }
-            Err(e) => eprintln!("[Ayux Init] Failed to start {}: {}", name, e),
+            Err(e) => {
+                println!("FAILED");
+                eprintln!("[Ayux Init] Failed to start {}: {}", name, e);
+            }
         }
-        thread::sleep(Duration::from_millis(300));
+        thread::sleep(Duration::from_millis(100));
     }
 
-    println!(" • Starting Login Manager");
+    print!(" • Starting {:<30}", "Login Manager");
+    io::stdout().flush().ok();
     let mut login_manager: Option<Child> = None;
 
     loop {
@@ -199,10 +203,20 @@ fn main() {
         };
 
         if login_manager_needs_start {
-            println!("\nSystem Ready.\n");
             match Command::new("/bin/login_manager").spawn() {
-                Ok(child) => login_manager = Some(child),
-                Err(e) => eprintln!("[Ayux Init] Failed to start login manager: {}", e),
+                Ok(child) => {
+                    if login_manager.is_none() {
+                        println!("OK");
+                        println!("\nSystem Ready.\n");
+                    }
+                    login_manager = Some(child);
+                }
+                Err(e) => {
+                    if login_manager.is_none() {
+                        println!("FAILED");
+                    }
+                    eprintln!("[Ayux Init] Failed to start login manager: {}", e);
+                }
             }
         }
 
