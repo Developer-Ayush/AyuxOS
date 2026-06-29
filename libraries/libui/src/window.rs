@@ -63,6 +63,13 @@ impl Window {
                                             ws[next_idx].set_focused(true);
                                         }
                                     }
+                                    libaipc::InputEventData::Key { .. } => {
+                                        for widget in ws.iter_mut() {
+                                            if widget.handle_event(&input_data) {
+                                                break;
+                                            }
+                                        }
+                                    }
                                     libaipc::InputEventData::MouseButton { pressed: true, .. } => {
                                         let mut handled = false;
                                         let mut clicked_idx = None;
