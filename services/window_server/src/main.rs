@@ -8,7 +8,7 @@ use libayux_hal::display::{Display, LinuxFramebuffer};
 use libayux_hal::input::{InputDevice, LinuxEvdev, InputEvent};
 use libgraphics::{Canvas, Color, Rect};
 use std::os::unix::net::{UnixListener, UnixStream};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, Condvar};
 use std::thread;
 use std::fs;
 
@@ -29,9 +29,10 @@ struct WindowServer {
     mouse_x: i32,
     mouse_y: i32,
     background_dirty: bool,
-    cursor_dirty: bool,
     last_mouse_x: i32,
     last_mouse_y: i32,
+    damage_regions: Vec<Rect>,
+    should_redraw: bool,
 }
 
 impl WindowServer {
@@ -47,9 +48,10 @@ impl WindowServer {
             mouse_x: (info.width / 2) as i32,
             mouse_y: (info.height / 2) as i32,
             background_dirty: true,
-            cursor_dirty: true,
             last_mouse_x: -1,
             last_mouse_y: -1,
+            damage_regions: Vec::new(),
+            should_redraw: true,
         })
     }
 
@@ -57,7 +59,7 @@ impl WindowServer {
         let id = self.next_window_id;
         self.next_window_id += 1;
 
-        let shm = SharedMemory::open(&shm_name, (width * height * 4) as usize)
+        let shm = SharedMemory::open(&shm_name, (width * height * 4) as usize + libayux::shm::SHM_HEADER_SIZE)
             .map_err(|e| format!("Failed to open SHM {}: {}", shm_name, e))?;
 
         let window = Window {
@@ -87,7 +89,7 @@ impl WindowServer {
         let mut local_x = 0;
         let mut local_y = 0;
 
-        if event_type == "mouse" {
+        if event_type == "mouse" || event_type == "mouse_move" || event_type == "mouse_button" {
             for window in self.windows.iter().rev() {
                 if window.rect.contains(self.mouse_x, self.mouse_y) {
                     target_window_id = Some(window.id);
@@ -102,19 +104,26 @@ impl WindowServer {
 
         if let Some(wid) = target_window_id {
             if let Some(win) = self.windows.iter_mut().find(|w| w.id == wid) {
-                let event_data = if event_type == "mouse_move" {
-                    InputEventData::MouseMove { x: self.mouse_x, y: self.mouse_y, local_x, local_y }
-                } else if event_type == "mouse_button" {
-                    InputEventData::MouseButton {
-                        button: button.unwrap(),
-                        pressed: pressed.unwrap(),
-                        x: self.mouse_x,
-                        y: self.mouse_y,
-                        local_x,
-                        local_y
-                    }
-                } else {
-                    InputEventData::Key { code: code.unwrap(), pressed: pressed.unwrap() }
+                let event_data = match event_type {
+                    "mouse_move" => InputEventData::MouseMove { x: self.mouse_x, y: self.mouse_y, local_x, local_y },
+                    "mouse_button" => {
+                        let button = button.unwrap_or(0);
+                        let pressed = pressed.unwrap_or(false);
+                        InputEventData::MouseButton {
+                            button,
+                            pressed,
+                            x: self.mouse_x,
+                            y: self.mouse_y,
+                            local_x,
+                            local_y
+                        }
+                    },
+                    "key" => {
+                        let code = code.unwrap_or(0);
+                        let pressed = pressed.unwrap_or(false);
+                        InputEventData::Key { code, pressed }
+                    },
+                    _ => return,
                 };
 
                 if let Ok(stream) = win.client_stream.try_clone() {
@@ -135,40 +144,63 @@ impl WindowServer {
         }
     }
 
+    fn invalidate(&mut self, rect: Rect) {
+        self.damage_regions.push(rect);
+        self.should_redraw = true;
+    }
+
     fn compose(&mut self) {
         let info = match self.display.get_info() {
             Ok(i) => i,
             Err(_) => return,
         };
 
-        let mut needs_flip = false;
+        if self.background_dirty {
+            self.invalidate(Rect::new(0, 0, info.width, info.height));
+            self.background_dirty = false;
+        }
 
-        // If background is dirty or window list changed significantly, redraw everything
-        // For now, let's keep it simple but use optimized blit
-        if self.background_dirty || self.windows.iter().any(|w| w.dirty) || self.mouse_x != self.last_mouse_x || self.mouse_y != self.last_mouse_y {
-            let mut canvas = Canvas::new(self.display.get_buffer(), info.width, info.height, info.width * 4);
+        for window in &self.windows {
+            if window.dirty {
+                self.damage_regions.push(window.rect);
+            }
+        }
 
+        if self.mouse_x != self.last_mouse_x || self.mouse_y != self.last_mouse_y {
+            self.invalidate(Rect::new(self.last_mouse_x, self.last_mouse_y, 10, 10));
+            self.invalidate(Rect::new(self.mouse_x, self.mouse_y, 10, 10));
+        }
+
+        if self.damage_regions.is_empty() {
+            return;
+        }
+
+        let mut canvas = Canvas::new(self.display.get_buffer(), info.width, info.height, info.width * 4);
+
+        // Deduplicate and merge regions could be done here for optimization
+        let regions = std::mem::take(&mut self.damage_regions);
+
+        for region in regions {
+            canvas.set_clip(region);
             canvas.clear(Color::rgb(40, 44, 52));
 
             for window in &mut self.windows {
-                let shm_data = window.shm.as_slice_mut();
-                canvas.blit(window.rect.x, window.rect.y, shm_data, window.rect.width, window.rect.height, window.rect.width * 4, true);
+                if window.shm.is_ready() {
+                    let shm_data = window.shm.as_slice_mut();
+                    canvas.blit(window.rect.x, window.rect.y, shm_data, window.rect.width, window.rect.height, window.rect.width * 4, false);
+                }
                 canvas.draw_rect(Rect::new(window.rect.x - 1, window.rect.y - 1, window.rect.width + 2, window.rect.height + 2), Color::WHITE);
                 window.dirty = false;
             }
-
-            // Draw cursor
-            canvas.fill_rect(Rect::new(self.mouse_x, self.mouse_y, 10, 10), Color::RED);
-
-            self.last_mouse_x = self.mouse_x;
-            self.last_mouse_y = self.mouse_y;
-            self.background_dirty = false;
-            needs_flip = true;
         }
 
-        if needs_flip {
-            let _ = self.display.flip();
-        }
+        // Draw cursor (always on top)
+        canvas.set_clip(Rect::new(0, 0, info.width, info.height));
+        canvas.fill_rect(Rect::new(self.mouse_x, self.mouse_y, 10, 10), Color::RED);
+
+        self.last_mouse_x = self.mouse_x;
+        self.last_mouse_y = self.mouse_y;
+        let _ = self.display.flip();
     }
 }
 
@@ -186,11 +218,17 @@ fn main() {
         }
     };
 
-    let server = Arc::new(Mutex::new(server_instance));
+    let server = Arc::new((Mutex::new(server_instance), Condvar::new()));
 
     let server_ipc = Arc::clone(&server);
     thread::spawn(move || {
-        let listener = UnixListener::bind(socket_path).expect("Failed to bind window server socket");
+        let listener = match UnixListener::bind(socket_path) {
+            Ok(l) => l,
+            Err(e) => {
+                eprintln!("Failed to bind window server socket: {}", e);
+                return;
+            }
+        };
         for stream in listener.incoming() {
             if let Ok(stream) = stream {
                 let server_inner = Arc::clone(&server_ipc);
@@ -211,9 +249,16 @@ fn main() {
         }
 
         let (width, height) = {
-            let s = server_input.lock().expect("Failed to lock server_input");
-            let info = s.display.get_info().expect("Failed to get display info");
-            (info.width as i32, info.height as i32)
+            let (lock, _) = &*server_input;
+            if let Ok(s) = lock.lock() {
+                if let Ok(info) = s.display.get_info() {
+                    (info.width as i32, info.height as i32)
+                } else {
+                    (800, 600) // Fallback
+                }
+            } else {
+                (800, 600) // Fallback
+            }
         };
 
         loop {
@@ -221,7 +266,11 @@ fn main() {
             for dev in &mut devices {
                 while let Ok(event) = dev.read_event() {
                     any_event = true;
-                    let mut s = server_input.lock().unwrap();
+                    let (lock, cvar) = &*server_input;
+                    let mut s = match lock.lock() {
+                        Ok(s) => s,
+                        Err(_) => continue,
+                    };
                     match event {
                         InputEvent::Rel { axis, value, .. } => {
                             if axis == 0 { s.mouse_x = (s.mouse_x + value).max(0).min(width - 1); }
@@ -237,6 +286,7 @@ fn main() {
                         }
                         _ => {}
                     }
+                    cvar.notify_one();
                 }
             }
             if !any_event {
@@ -245,31 +295,30 @@ fn main() {
         }
     });
 
-    let mut last_frame = std::time::Instant::now();
-    let frame_target = std::time::Duration::from_micros(16666); // ~60 FPS
-
     loop {
-        {
-            let mut s = server.lock().unwrap();
-            s.compose();
+        let (lock, cvar) = &*server;
+        let mut s = lock.lock().unwrap();
+        while !s.should_redraw {
+            s = cvar.wait(s).unwrap();
         }
 
-        let elapsed = last_frame.elapsed();
-        if elapsed < frame_target {
-            thread::sleep(frame_target - elapsed);
-        }
-        last_frame = std::time::Instant::now();
+        s.should_redraw = false;
+        s.compose();
     }
 }
 
-fn handle_client(server: Arc<Mutex<WindowServer>>, stream: UnixStream) {
+fn handle_client(server: Arc<(Mutex<WindowServer>, Condvar)>, stream: UnixStream) {
     let mut client = libaipc::AipcClient::from_stream(stream);
     let mut window_ids = Vec::new();
 
     loop {
         match client.receive_envelope_safe() {
             Ok(Some(envelope)) => {
-                let mut s = server.lock().unwrap();
+                let (lock, cvar) = &*server;
+                let mut s = match lock.lock() {
+                    Ok(s) => s,
+                    Err(_) => break,
+                };
                 match envelope.message {
                     AipcMessage::Window(req) => {
                         match req {
@@ -307,17 +356,23 @@ fn handle_client(server: Arc<Mutex<WindowServer>>, stream: UnixStream) {
                     AipcMessage::WindowEvent(WindowEvent::Dirty { window_id }) => {
                         if let Some(win) = s.windows.iter_mut().find(|w| w.id == window_id) {
                             win.dirty = true;
+                            s.should_redraw = true;
                         }
                     }
                     _ => {}
                 }
+                cvar.notify_one();
             }
             _ => break,
         }
     }
 
-    let mut s = server.lock().unwrap();
-    for id in window_ids {
-        s.remove_window(id);
+    let (lock, cvar) = &*server;
+    if let Ok(mut s) = lock.lock() {
+        for id in window_ids {
+            s.remove_window(id);
+        }
+        s.should_redraw = true;
+        cvar.notify_one();
     }
 }

@@ -32,4 +32,15 @@ impl FontEngine {
             x += metrics.advance_width as i32;
         }
     }
+
+    pub fn measure_text(&self, text: &str) -> (u32, u32) {
+        let mut width = 0;
+        let mut height = 0;
+        for c in text.chars() {
+            let metrics = self.font.metrics(c, self.size);
+            width += metrics.advance_width as u32;
+            height = height.max(metrics.height as u32);
+        }
+        (width, height)
+    }
 }

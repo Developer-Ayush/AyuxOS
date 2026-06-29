@@ -26,6 +26,9 @@ fn main() {
         text: Arc::clone(&user_input),
         rect: Rect::new(170, 70, 150, 30),
         focused: true,
+        shift_pressed: false,
+        caret_visible: std::cell::Cell::new(true),
+        last_blink: std::cell::Cell::new(std::time::Instant::now()),
     };
 
     window.add_widget(Box::new(user_input_widget));
@@ -40,6 +43,9 @@ fn main() {
         text: Arc::clone(&pass_input),
         rect: Rect::new(170, 120, 150, 30),
         focused: false,
+        shift_pressed: false,
+        caret_visible: std::cell::Cell::new(true),
+        last_blink: std::cell::Cell::new(std::time::Instant::now()),
     };
 
     window.add_widget(Box::new(pass_input_widget));

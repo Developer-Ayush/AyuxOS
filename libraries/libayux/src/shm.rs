@@ -91,10 +91,49 @@ impl SharedMemory {
         })
     }
 
+    pub fn set_ready(&mut self, ready: bool) {
+        unsafe {
+            let header_ptr = self.ptr as *mut ShmHeader;
+            (*header_ptr).ready = if ready { 1 } else { 0 };
+            (*header_ptr).generation = (*header_ptr).generation.wrapping_add(1);
+        }
+    }
+
+    pub fn is_ready(&self) -> bool {
+        unsafe {
+            let header_ptr = self.ptr as *const ShmHeader;
+            (*header_ptr).ready != 0
+        }
+    }
+
+    pub fn get_generation(&self) -> u32 {
+        unsafe {
+            let header_ptr = self.ptr as *const ShmHeader;
+            (*header_ptr).generation
+        }
+    }
+
     pub fn as_slice_mut(&mut self) -> &mut [u8] {
-        unsafe { std::slice::from_raw_parts_mut(self.ptr as *mut u8, self.size) }
+        unsafe {
+            let data_ptr = (self.ptr as *mut u8).add(std::mem::size_of::<ShmHeader>());
+            let data_size = self.size - std::mem::size_of::<ShmHeader>();
+            std::slice::from_raw_parts_mut(data_ptr, data_size)
+        }
+    }
+
+    pub fn data_ptr(&self) -> *const u8 {
+        unsafe { (self.ptr as *const u8).add(std::mem::size_of::<ShmHeader>()) }
     }
 }
+
+#[repr(C)]
+struct ShmHeader {
+    ready: u32,
+    generation: u32,
+    _reserved: [u32; 6],
+}
+
+pub const SHM_HEADER_SIZE: usize = std::mem::size_of::<ShmHeader>();
 
 impl Drop for SharedMemory {
     fn drop(&mut self) {
