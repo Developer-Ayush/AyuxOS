@@ -22,7 +22,7 @@ impl Window {
     pub fn new(title: &str, width: u32, height: u32) -> io::Result<Self> {
         let pid = std::process::id();
         let shm_name = format!("win_shm_{}_{}", pid, rand::random::<u32>());
-        let shm = SharedMemory::create(&shm_name, (width * height * 4) as usize)?;
+        let shm = SharedMemory::create(&shm_name, (width * height * 4) as usize + libayux::shm::SHM_HEADER_SIZE)?;
 
         let mut client = AipcClient::connect(paths::WINDOW_SERVER_SOCKET)?;
         let resp = client.request("libui", None, AipcMessage::Window(WindowRequest::CreateWindow {
@@ -48,9 +48,45 @@ impl Window {
                     if let Ok(mut ws) = widgets_clone.lock() {
                         match event {
                             WindowEvent::Input { event: input_data } => {
-                                for widget in ws.iter_mut() {
-                                    if widget.handle_event(&input_data) {
+                                match input_data {
+                                    libaipc::InputEventData::Key { code, pressed: true } if code == 15 => { // Tab
+                                        let focused_idx = ws.iter().position(|w| w.is_focused());
+                                        let next_idx = match focused_idx {
+                                            Some(i) => (i + 1) % ws.len(),
+                                            None => 0,
+                                        };
+
+                                        if let Some(i) = focused_idx {
+                                            ws[i].set_focused(false);
+                                        }
+                                        ws[next_idx].set_focused(true);
                                         break;
+                                    }
+                                    libaipc::InputEventData::MouseButton { pressed: true, .. } => {
+                                        let mut handled = false;
+                                        let mut clicked_idx = None;
+                                        for (i, widget) in ws.iter_mut().enumerate() {
+                                            if widget.handle_event(&input_data) {
+                                                clicked_idx = Some(i);
+                                                handled = true;
+                                                break;
+                                            }
+                                        }
+                                        if handled {
+                                            for (i, widget) in ws.iter_mut().enumerate() {
+                                                if Some(i) != clicked_idx {
+                                                    widget.set_focused(false);
+                                                }
+                                            }
+                                        }
+                                        break;
+                                    }
+                                    _ => {
+                                        for widget in ws.iter_mut() {
+                                            if widget.handle_event(&input_data) {
+                                                break;
+                                            }
+                                        }
                                     }
                                 }
                             }
@@ -85,13 +121,17 @@ impl Window {
     }
 
     pub fn render(&mut self) {
-        let mut canvas = Canvas::new(self.shm.as_slice_mut(), self.rect.width, self.rect.height, self.rect.width * 4);
-        canvas.clear(self.theme.background);
-        if let Ok(ws) = self.widgets.lock() {
-            for widget in ws.iter() {
-                widget.draw(&mut canvas, &self.theme);
+        self.shm.set_ready(false);
+        {
+            let mut canvas = Canvas::new(self.shm.as_slice_mut(), self.rect.width, self.rect.height, self.rect.width * 4);
+            canvas.clear(self.theme.background);
+            if let Ok(ws) = self.widgets.lock() {
+                for widget in ws.iter() {
+                    widget.draw(&mut canvas, &self.theme);
+                }
             }
         }
+        self.shm.set_ready(true);
 
         // Notify window server that we are dirty
         if let Ok(mut client) = self.client.lock() {
