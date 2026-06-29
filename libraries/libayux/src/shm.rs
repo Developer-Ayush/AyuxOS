@@ -13,7 +13,7 @@ unsafe impl Sync for SharedMemory {}
 
 impl SharedMemory {
     pub fn create(name: &str, size: usize) -> io::Result<Self> {
-        let name_cstr = std::ffi::CString::new(name).unwrap();
+        let name_cstr = std::ffi::CString::new(name).map_err(|e| io::Error::new(io::ErrorKind::InvalidInput, e))?;
         let fd = unsafe {
             libc::shm_open(
                 name_cstr.as_ptr(),
@@ -55,7 +55,7 @@ impl SharedMemory {
     }
 
     pub fn open(name: &str, size: usize) -> io::Result<Self> {
-        let name_cstr = std::ffi::CString::new(name).unwrap();
+        let name_cstr = std::ffi::CString::new(name).map_err(|e| io::Error::new(io::ErrorKind::InvalidInput, e))?;
         let fd = unsafe {
             libc::shm_open(
                 name_cstr.as_ptr(),
@@ -104,9 +104,10 @@ impl Drop for SharedMemory {
     }
 }
 
-pub fn shm_unlink(name: &str) {
-    let name_cstr = std::ffi::CString::new(name).unwrap();
-    unsafe {
-        libc::shm_unlink(name_cstr.as_ptr());
+pub fn shm_unlink(name: &str) -> io::Result<()> {
+    let name_cstr = std::ffi::CString::new(name).map_err(|e| io::Error::new(io::ErrorKind::InvalidInput, e))?;
+    if unsafe { libc::shm_unlink(name_cstr.as_ptr()) } == -1 {
+        return Err(io::Error::last_os_error());
     }
+    Ok(())
 }

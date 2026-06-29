@@ -239,6 +239,9 @@ pub enum WindowEvent {
     Input {
         event: InputEventData,
     },
+    Dirty {
+        window_id: u32,
+    },
     FocusIn,
     FocusOut,
     Close,
@@ -350,6 +353,26 @@ impl AipcClient {
 
         let envelope: AipcEnvelope = bincode::deserialize(&buffer).map_err(io::Error::other)?;
         Ok(Some(envelope))
+    }
+
+    pub fn send(
+        &mut self,
+        sender: &str,
+        session_id: Option<String>,
+        msg: AipcMessage,
+    ) -> io::Result<()> {
+        let envelope = AipcEnvelope {
+            header: AipcHeader {
+                version: AIPC_VERSION,
+                message_type: MessageType::Event,
+                sender: sender.to_string(),
+                session_id,
+                correlation_id: rand::random::<u64>(),
+            },
+            message: msg,
+        };
+
+        self.send_envelope(&envelope)
     }
 
     pub fn request(

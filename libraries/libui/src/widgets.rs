@@ -207,11 +207,12 @@ impl Widget for Terminal {
 
 fn code_to_char(code: u16) -> Option<char> {
     match code {
-        16..=25 => Some("qwertyuiop".chars().nth((code - 16) as usize).unwrap()),
-        30..=38 => Some("asdfghjkl".chars().nth((code - 30) as usize).unwrap()),
-        44..=50 => Some("zxcvbnm".chars().nth((code - 44) as usize).unwrap()),
+        16..=25 => "qwertyuiop".chars().nth((code - 16) as usize),
+        30..=38 => "asdfghjkl".chars().nth((code - 30) as usize),
+        44..=50 => "zxcvbnm".chars().nth((code - 44) as usize),
         57 => Some(' '),
-        2..=11 => Some("1234567890".chars().nth((code - 2) as usize).unwrap()),
+        2..=10 => "123456789".chars().nth((code - 2) as usize),
+        11 => Some('0'),
         _ => None,
     }
 }

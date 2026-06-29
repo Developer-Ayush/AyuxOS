@@ -18,6 +18,7 @@ struct Window {
     rect: Rect,
     shm: SharedMemory,
     client_stream: UnixStream,
+    dirty: bool,
 }
 
 struct WindowServer {
@@ -27,27 +28,37 @@ struct WindowServer {
     focused_window_id: Option<u32>,
     mouse_x: i32,
     mouse_y: i32,
+    background_dirty: bool,
+    cursor_dirty: bool,
+    last_mouse_x: i32,
+    last_mouse_y: i32,
 }
 
 impl WindowServer {
     fn new() -> Result<Self, String> {
         let display = LinuxFramebuffer::new("/dev/fb0")
             .map_err(|e| format!("Could not open /dev/fb0: {:?}", e))?;
+        let info = display.get_info().map_err(|e| e.to_string())?;
         Ok(Self {
             display,
             windows: Vec::new(),
             next_window_id: 1,
             focused_window_id: None,
-            mouse_x: 512,
-            mouse_y: 384,
+            mouse_x: (info.width / 2) as i32,
+            mouse_y: (info.height / 2) as i32,
+            background_dirty: true,
+            cursor_dirty: true,
+            last_mouse_x: -1,
+            last_mouse_y: -1,
         })
     }
 
-    fn create_window(&mut self, title: String, width: u32, height: u32, shm_name: String, stream: UnixStream) -> u32 {
+    fn create_window(&mut self, title: String, width: u32, height: u32, shm_name: String, stream: UnixStream) -> Result<u32, String> {
         let id = self.next_window_id;
         self.next_window_id += 1;
 
-        let shm = SharedMemory::open(&shm_name, (width * height * 4) as usize).expect("Failed to open SHM");
+        let shm = SharedMemory::open(&shm_name, (width * height * 4) as usize)
+            .map_err(|e| format!("Failed to open SHM {}: {}", shm_name, e))?;
 
         let window = Window {
             id,
@@ -55,11 +66,13 @@ impl WindowServer {
             rect: Rect::new(100, 100, width, height),
             shm,
             client_stream: stream,
+            dirty: true,
         };
 
         self.windows.push(window);
         self.focused_window_id = Some(id);
-        id
+        self.background_dirty = true;
+        Ok(id)
     }
 
     fn remove_window(&mut self, id: u32) {
@@ -123,31 +136,39 @@ impl WindowServer {
     }
 
     fn compose(&mut self) {
-        let info = self.display.get_info().unwrap();
-        let mut canvas = Canvas::new(self.display.get_buffer(), info.width, info.height, info.pitch);
+        let info = match self.display.get_info() {
+            Ok(i) => i,
+            Err(_) => return,
+        };
 
-        canvas.clear(Color::rgb(40, 44, 52));
+        let mut needs_flip = false;
 
-        for window in &mut self.windows {
-            let win_w = window.rect.width;
-            let win_h = window.rect.height;
-            let shm_data = window.shm.as_slice_mut();
+        // If background is dirty or window list changed significantly, redraw everything
+        // For now, let's keep it simple but use optimized blit
+        if self.background_dirty || self.windows.iter().any(|w| w.dirty) || self.mouse_x != self.last_mouse_x || self.mouse_y != self.last_mouse_y {
+            let mut canvas = Canvas::new(self.display.get_buffer(), info.width, info.height, info.width * 4);
 
-            for win_y in 0..win_h {
-                for win_x in 0..win_w {
-                    let offset = (win_y * win_w * 4 + win_x * 4) as usize;
-                    let b = shm_data[offset];
-                    let g = shm_data[offset + 1];
-                    let r = shm_data[offset + 2];
-                    let a = shm_data[offset + 3];
-                    canvas.put_pixel(window.rect.x + win_x as i32, window.rect.y + win_y as i32, Color::rgba(r, g, b, a));
-                }
+            canvas.clear(Color::rgb(40, 44, 52));
+
+            for window in &mut self.windows {
+                let shm_data = window.shm.as_slice_mut();
+                canvas.blit(window.rect.x, window.rect.y, shm_data, window.rect.width, window.rect.height, window.rect.width * 4, true);
+                canvas.draw_rect(Rect::new(window.rect.x - 1, window.rect.y - 1, window.rect.width + 2, window.rect.height + 2), Color::WHITE);
+                window.dirty = false;
             }
-            canvas.draw_rect(Rect::new(window.rect.x - 1, window.rect.y - 1, window.rect.width + 2, window.rect.height + 2), Color::WHITE);
+
+            // Draw cursor
+            canvas.fill_rect(Rect::new(self.mouse_x, self.mouse_y, 10, 10), Color::RED);
+
+            self.last_mouse_x = self.mouse_x;
+            self.last_mouse_y = self.mouse_y;
+            self.background_dirty = false;
+            needs_flip = true;
         }
 
-        canvas.fill_rect(Rect::new(self.mouse_x, self.mouse_y, 10, 10), Color::RED);
-        let _ = self.display.flip();
+        if needs_flip {
+            let _ = self.display.flip();
+        }
     }
 }
 
@@ -169,7 +190,7 @@ fn main() {
 
     let server_ipc = Arc::clone(&server);
     thread::spawn(move || {
-        let listener = UnixListener::bind(socket_path).unwrap();
+        let listener = UnixListener::bind(socket_path).expect("Failed to bind window server socket");
         for stream in listener.incoming() {
             if let Ok(stream) = stream {
                 let server_inner = Arc::clone(&server_ipc);
@@ -183,20 +204,28 @@ fn main() {
     let server_input = Arc::clone(&server);
     thread::spawn(move || {
         let mut devices = Vec::new();
-        for i in 0..10 {
+        for i in 0..16 {
             if let Ok(dev) = LinuxEvdev::new(&format!("/dev/input/event{}", i)) {
                 devices.push(dev);
             }
         }
 
+        let (width, height) = {
+            let s = server_input.lock().expect("Failed to lock server_input");
+            let info = s.display.get_info().expect("Failed to get display info");
+            (info.width as i32, info.height as i32)
+        };
+
         loop {
+            let mut any_event = false;
             for dev in &mut devices {
                 while let Ok(event) = dev.read_event() {
+                    any_event = true;
                     let mut s = server_input.lock().unwrap();
                     match event {
                         InputEvent::Rel { axis, value, .. } => {
-                            if axis == 0 { s.mouse_x = (s.mouse_x + value).max(0).min(1024); }
-                            else if axis == 1 { s.mouse_y = (s.mouse_y + value).max(0).min(768); }
+                            if axis == 0 { s.mouse_x = (s.mouse_x + value).max(0).min(width - 1); }
+                            else if axis == 1 { s.mouse_y = (s.mouse_y + value).max(0).min(height - 1); }
                             s.dispatch_input("mouse_move", None, None, None);
                         }
                         InputEvent::Key { code, value } => {
@@ -210,16 +239,26 @@ fn main() {
                     }
                 }
             }
-            thread::sleep(std::time::Duration::from_millis(10));
+            if !any_event {
+                thread::sleep(std::time::Duration::from_millis(5));
+            }
         }
     });
+
+    let mut last_frame = std::time::Instant::now();
+    let frame_target = std::time::Duration::from_micros(16666); // ~60 FPS
 
     loop {
         {
             let mut s = server.lock().unwrap();
             s.compose();
         }
-        thread::sleep(std::time::Duration::from_millis(16));
+
+        let elapsed = last_frame.elapsed();
+        if elapsed < frame_target {
+            thread::sleep(frame_target - elapsed);
+        }
+        last_frame = std::time::Instant::now();
     }
 }
 
@@ -230,30 +269,47 @@ fn handle_client(server: Arc<Mutex<WindowServer>>, stream: UnixStream) {
     loop {
         match client.receive_envelope_safe() {
             Ok(Some(envelope)) => {
-                if let AipcMessage::Window(req) = envelope.message {
-                    let mut s = server.lock().unwrap();
-                    match req {
-                        WindowRequest::CreateWindow { title, width, height, shm_name } => {
-                            let id = s.create_window(title, width, height, shm_name, client.stream.try_clone().unwrap());
-                            window_ids.push(id);
-                            let res = AipcMessage::WindowRes(WindowResponse::WindowCreated { window_id: id });
-                            let _ = client.send_envelope(&AipcEnvelope {
-                                header: AipcHeader {
-                                    version: libaipc::AIPC_VERSION,
-                                    message_type: MessageType::Response,
-                                    sender: "window_server".into(),
-                                    session_id: None,
-                                    correlation_id: envelope.header.correlation_id,
-                                },
-                                message: res,
-                            });
+                let mut s = server.lock().unwrap();
+                match envelope.message {
+                    AipcMessage::Window(req) => {
+                        match req {
+                            WindowRequest::CreateWindow { title, width, height, shm_name } => {
+                                let stream_res = client.stream.try_clone();
+                                if let Ok(stream) = stream_res {
+                                    match s.create_window(title, width, height, shm_name, stream) {
+                                        Ok(id) => {
+                                            window_ids.push(id);
+                                            let res = AipcMessage::WindowRes(WindowResponse::WindowCreated { window_id: id });
+                                            let _ = client.send_envelope(&AipcEnvelope {
+                                                header: AipcHeader {
+                                                    version: libaipc::AIPC_VERSION,
+                                                    message_type: MessageType::Response,
+                                                    sender: "window_server".into(),
+                                                    session_id: None,
+                                                    correlation_id: envelope.header.correlation_id,
+                                                },
+                                                message: res,
+                                            });
+                                        }
+                                        Err(e) => {
+                                            eprintln!("Failed to create window: {}", e);
+                                        }
+                                    }
+                                }
+                            }
+                            WindowRequest::DestroyWindow { window_id } => {
+                                s.remove_window(window_id);
+                                window_ids.retain(|&id| id != window_id);
+                            }
+                            _ => {}
                         }
-                        WindowRequest::DestroyWindow { window_id } => {
-                            s.remove_window(window_id);
-                            window_ids.retain(|&id| id != window_id);
-                        }
-                        _ => {}
                     }
+                    AipcMessage::WindowEvent(WindowEvent::Dirty { window_id }) => {
+                        if let Some(win) = s.windows.iter_mut().find(|w| w.id == window_id) {
+                            win.dirty = true;
+                        }
+                    }
+                    _ => {}
                 }
             }
             _ => break,
