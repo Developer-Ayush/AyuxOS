@@ -27,6 +27,7 @@ fn main() {
         rect: Rect::new(170, 70, 150, 30),
         focused: true,
         shift_pressed: false,
+        caps_lock: false,
         caret_visible: std::cell::Cell::new(true),
         last_blink: std::cell::Cell::new(std::time::Instant::now()),
     };
@@ -44,6 +45,7 @@ fn main() {
         rect: Rect::new(170, 120, 150, 30),
         focused: false,
         shift_pressed: false,
+        caps_lock: false,
         caret_visible: std::cell::Cell::new(true),
         last_blink: std::cell::Cell::new(std::time::Instant::now()),
     };
