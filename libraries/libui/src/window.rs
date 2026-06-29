@@ -14,7 +14,8 @@ pub struct Window {
     shm: SharedMemory,
     widgets: Arc<Mutex<Vec<Box<dyn Widget + Send>>>>,
     theme: Theme,
-    _window_id: u32,
+    window_id: u32,
+    client: Arc<Mutex<AipcClient>>,
 }
 
 impl Window {
@@ -60,13 +61,16 @@ impl Window {
             }
         });
 
+        let client_arc = Arc::new(Mutex::new(client));
+
         Ok(Self {
             _title: title.to_string(),
             rect: Rect::new(0, 0, width, height),
             shm,
             widgets,
             theme: Theme::default_ayux(),
-            _window_id: window_id,
+            window_id,
+            client: client_arc,
         })
     }
 
@@ -87,6 +91,11 @@ impl Window {
             for widget in ws.iter() {
                 widget.draw(&mut canvas, &self.theme);
             }
+        }
+
+        // Notify window server that we are dirty
+        if let Ok(mut client) = self.client.lock() {
+            let _ = client.send("libui", None, AipcMessage::WindowEvent(WindowEvent::Dirty { window_id: self.window_id }));
         }
     }
 }

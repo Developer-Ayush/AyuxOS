@@ -46,10 +46,51 @@ impl<'a> Canvas<'a> {
             let alpha = color.a as u32;
             let inv_alpha = 255 - alpha;
 
-            self.buffer[offset] = ((color.b as u32 * alpha + self.buffer[offset] as u32 * inv_alpha) / 255) as u8;
-            self.buffer[offset + 1] = ((color.g as u32 * alpha + self.buffer[offset + 1] as u32 * inv_alpha) / 255) as u8;
-            self.buffer[offset + 2] = ((color.r as u32 * alpha + self.buffer[offset + 2] as u32 * inv_alpha) / 255) as u8;
+            // Use faster blending
+            let b = ((color.b as u32 * alpha + self.buffer[offset] as u32 * inv_alpha + 127) / 255) as u8;
+            let g = ((color.g as u32 * alpha + self.buffer[offset + 1] as u32 * inv_alpha + 127) / 255) as u8;
+            let r = ((color.r as u32 * alpha + self.buffer[offset + 2] as u32 * inv_alpha + 127) / 255) as u8;
+
+            self.buffer[offset] = b;
+            self.buffer[offset + 1] = g;
+            self.buffer[offset + 2] = r;
             self.buffer[offset + 3] = 255; // Destination is always opaque for now
+        }
+    }
+
+    pub fn blit(&mut self, x: i32, y: i32, src_buffer: &[u8], src_w: u32, src_h: u32, src_pitch: u32, has_alpha: bool) {
+        let dest_rect = Rect::new(x, y, src_w, src_h);
+        let intersection = match dest_rect.intersection(&self.clip_rect) {
+            Some(r) => r,
+            None => return,
+        };
+
+        let start_x = intersection.x - x;
+        let start_y = intersection.y - y;
+
+        for row in 0..intersection.height as i32 {
+            let src_row = start_y + row;
+            let dest_row = intersection.y + row;
+
+            let src_offset = (src_row as u32 * src_pitch + start_x as u32 * 4) as usize;
+            let dest_offset = (dest_row as u32 * self.pitch + intersection.x as u32 * 4) as usize;
+
+            if !has_alpha {
+                // Fast copy
+                let copy_len = (intersection.width * 4) as usize;
+                self.buffer[dest_offset..dest_offset + copy_len]
+                    .copy_from_slice(&src_buffer[src_offset..src_offset + copy_len]);
+            } else {
+                // Alpha blit
+                for col in 0..intersection.width as i32 {
+                    let s_off = src_offset + (col as usize * 4);
+                    let b = src_buffer[s_off];
+                    let g = src_buffer[s_off + 1];
+                    let r = src_buffer[s_off + 2];
+                    let a = src_buffer[s_off + 3];
+                    self.put_pixel(intersection.x + col, dest_row, Color::rgba(r, g, b, a));
+                }
+            }
         }
     }
 
