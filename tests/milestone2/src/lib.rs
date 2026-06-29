@@ -52,18 +52,19 @@ mod tests {
 
     #[test]
     fn test_security_manager_logic_mock() {
+        use libayux::paths;
         // Mocking the permission check logic
         let username = "ayux";
         let path = "/users/ayux/data/file.txt";
-        let user_home = format!("/users/{}", username);
+        let user_home = paths::user_home(username);
 
-        let allowed =
-            (path.starts_with(&user_home) || path.starts_with("/tmp")) && !path.contains("..");
+        let allowed = (path.starts_with(&user_home) || path.starts_with(paths::AYUX_TMP))
+            && !path.contains("..");
         assert!(allowed);
 
         let forbidden_path = "/root/secret.txt";
         let allowed_forbidden = (forbidden_path.starts_with(&user_home)
-            || forbidden_path.starts_with("/tmp"))
+            || forbidden_path.starts_with(paths::AYUX_TMP))
             && !forbidden_path.contains("..");
         assert!(!allowed_forbidden);
     }

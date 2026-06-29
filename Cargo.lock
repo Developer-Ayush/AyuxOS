@@ -580,6 +580,7 @@ dependencies = [
  "argon2",
  "bincode",
  "libaipc",
+ "libayux",
  "nix 0.31.3",
  "rand",
  "serde",

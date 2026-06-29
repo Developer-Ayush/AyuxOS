@@ -14,7 +14,9 @@ pub struct Theme {
 
 impl Theme {
     pub fn default_ayux() -> Self {
-        let font_data = std::fs::read("/ayux/assets/default.ttf").ok();
+        use libayux::paths;
+        let font_path = format!("{}/default.ttf", paths::AYUX_FONTS);
+        let font_data = std::fs::read(font_path).ok();
         let font = font_data.and_then(|data| FontEngine::load(&data, 16.0).ok()).map(Arc::new);
 
         Self {

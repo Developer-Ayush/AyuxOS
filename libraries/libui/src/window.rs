@@ -1,4 +1,5 @@
 use libaipc::{AipcClient, AipcMessage, WindowRequest, WindowResponse, WindowEvent};
+use libayux::paths;
 use libayux::shm::SharedMemory;
 use libgraphics::{Canvas, Rect};
 use crate::widget::Widget;
@@ -22,7 +23,7 @@ impl Window {
         let shm_name = format!("win_shm_{}_{}", pid, rand::random::<u32>());
         let shm = SharedMemory::create(&shm_name, (width * height * 4) as usize)?;
 
-        let mut client = AipcClient::connect("/run/window_server.sock")?;
+        let mut client = AipcClient::connect(paths::WINDOW_SERVER_SOCKET)?;
         let resp = client.request("libui", None, AipcMessage::Window(WindowRequest::CreateWindow {
             title: title.to_string(),
             width,
