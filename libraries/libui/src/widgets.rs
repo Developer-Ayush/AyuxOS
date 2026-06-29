@@ -85,6 +85,7 @@ pub struct TextBox {
     pub rect: Rect,
     pub focused: bool,
     pub shift_pressed: bool,
+    pub caps_lock: bool,
     pub caret_visible: Cell<bool>,
     pub last_blink: Cell<std::time::Instant>,
 }
@@ -96,6 +97,7 @@ impl TextBox {
             rect,
             focused: false,
             shift_pressed: false,
+            caps_lock: false,
             caret_visible: Cell::new(true),
             last_blink: Cell::new(std::time::Instant::now()),
         }
@@ -138,6 +140,11 @@ impl Widget for TextBox {
                     return true;
                 }
 
+                if *code == 58 && *pressed { // Caps Lock
+                    self.caps_lock = !self.caps_lock;
+                    return true;
+                }
+
                 if !*pressed { return true; }
 
                 let mut t = match self.text.lock() {
@@ -147,11 +154,24 @@ impl Widget for TextBox {
 
                 match *code {
                     14 => { t.pop(); } // Backspace
+                    111 => { t.clear(); } // Delete - clear for now as we have no cursor
                     28 => { self.focused = false; } // Enter
                     1 => { self.focused = false; } // Esc
                     _ => {
+                        let is_upper = self.shift_pressed ^ self.caps_lock;
                         if let Some(c) = code_to_char(*code, self.shift_pressed) {
-                            t.push(c);
+                            let mut final_c = c;
+                            if c.is_ascii_alphabetic() {
+                                if is_upper {
+                                    final_c = c.to_ascii_uppercase();
+                                } else {
+                                    final_c = c.to_ascii_lowercase();
+                                }
+                            } else if self.shift_pressed {
+                                // For non-alphabetic, code_to_char already handles shift
+                                final_c = c;
+                            }
+                            t.push(final_c);
                         }
                     }
                 }
@@ -171,6 +191,7 @@ pub struct PasswordBox {
     pub rect: Rect,
     pub focused: bool,
     pub shift_pressed: bool,
+    pub caps_lock: bool,
     pub caret_visible: Cell<bool>,
     pub last_blink: Cell<std::time::Instant>,
 }
@@ -182,6 +203,7 @@ impl PasswordBox {
             rect,
             focused: false,
             shift_pressed: false,
+            caps_lock: false,
             caret_visible: Cell::new(true),
             last_blink: Cell::new(std::time::Instant::now()),
         }
@@ -225,6 +247,11 @@ impl Widget for PasswordBox {
                     return true;
                 }
 
+                if *code == 58 && *pressed { // Caps Lock
+                    self.caps_lock = !self.caps_lock;
+                    return true;
+                }
+
                 if !*pressed { return true; }
 
                 let mut t = match self.text.lock() {
@@ -234,11 +261,23 @@ impl Widget for PasswordBox {
 
                 match *code {
                     14 => { t.pop(); } // Backspace
+                    111 => { t.clear(); } // Delete - clear for now as we have no cursor
                     28 => { self.focused = false; } // Enter
                     1 => { self.focused = false; } // Esc
                     _ => {
+                        let is_upper = self.shift_pressed ^ self.caps_lock;
                         if let Some(c) = code_to_char(*code, self.shift_pressed) {
-                            t.push(c);
+                            let mut final_c = c;
+                            if c.is_ascii_alphabetic() {
+                                if is_upper {
+                                    final_c = c.to_ascii_uppercase();
+                                } else {
+                                    final_c = c.to_ascii_lowercase();
+                                }
+                            } else if self.shift_pressed {
+                                final_c = c;
+                            }
+                            t.push(final_c);
                         }
                     }
                 }
@@ -306,14 +345,14 @@ fn code_to_char(code: u16, shift: bool) -> Option<char> {
             2 => Some('1'), 3 => Some('2'), 4 => Some('3'), 5 => Some('4'), 6 => Some('5'),
             7 => Some('6'), 8 => Some('7'), 9 => Some('8'), 10 => Some('9'), 11 => Some('0'),
             12 => Some('-'), 13 => Some('='),
+            51 => Some(','), 52 => Some('.'), 53 => Some('/'),
+            39 => Some(';'), 40 => Some('\''), 26 => Some('['), 27 => Some(']'), 43 => Some('\\'), 41 => Some('`'),
             16 => Some('q'), 17 => Some('w'), 18 => Some('e'), 19 => Some('r'), 20 => Some('t'),
             21 => Some('y'), 22 => Some('u'), 23 => Some('i'), 24 => Some('o'), 25 => Some('p'),
-            26 => Some('['), 27 => Some(']'), 43 => Some('\\'),
             30 => Some('a'), 31 => Some('s'), 32 => Some('d'), 33 => Some('f'), 34 => Some('g'),
-            35 => Some('h'), 36 => Some('j'), 37 => Some('k'), 38 => Some('l'), 39 => Some(';'),
-            40 => Some('\''),
+            35 => Some('h'), 36 => Some('j'), 37 => Some('k'), 38 => Some('l'),
             44 => Some('z'), 45 => Some('x'), 46 => Some('c'), 47 => Some('v'), 48 => Some('b'),
-            49 => Some('n'), 50 => Some('m'), 51 => Some(','), 52 => Some('.'), 53 => Some('/'),
+            49 => Some('n'), 50 => Some('m'),
             57 => Some(' '),
             _ => None,
         }
@@ -322,14 +361,14 @@ fn code_to_char(code: u16, shift: bool) -> Option<char> {
             2 => Some('!'), 3 => Some('@'), 4 => Some('#'), 5 => Some('$'), 6 => Some('%'),
             7 => Some('^'), 8 => Some('&'), 9 => Some('*'), 10 => Some('('), 11 => Some(')'),
             12 => Some('_'), 13 => Some('+'),
+            51 => Some('<'), 52 => Some('>'), 53 => Some('?'),
+            39 => Some(':'), 40 => Some('"'), 26 => Some('{'), 27 => Some('}'), 43 => Some('|'), 41 => Some('~'),
             16 => Some('Q'), 17 => Some('W'), 18 => Some('E'), 19 => Some('R'), 20 => Some('T'),
             21 => Some('Y'), 22 => Some('U'), 23 => Some('I'), 24 => Some('O'), 25 => Some('P'),
-            26 => Some('{'), 27 => Some('}'), 43 => Some('|'),
             30 => Some('A'), 31 => Some('S'), 32 => Some('D'), 33 => Some('F'), 34 => Some('G'),
-            35 => Some('H'), 36 => Some('J'), 37 => Some('K'), 38 => Some('L'), 39 => Some(':'),
-            40 => Some('"'),
+            35 => Some('H'), 36 => Some('J'), 37 => Some('K'), 38 => Some('L'),
             44 => Some('Z'), 45 => Some('X'), 46 => Some('C'), 47 => Some('V'), 48 => Some('B'),
-            49 => Some('N'), 50 => Some('M'), 51 => Some('<'), 52 => Some('>'), 53 => Some('?'),
+            49 => Some('N'), 50 => Some('M'),
             57 => Some(' '),
             _ => None,
         }
