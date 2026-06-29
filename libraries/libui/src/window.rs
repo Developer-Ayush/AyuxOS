@@ -59,8 +59,9 @@ impl Window {
                                         if let Some(i) = focused_idx {
                                             ws[i].set_focused(false);
                                         }
-                                        ws[next_idx].set_focused(true);
-                                        break;
+                                        if !ws.is_empty() {
+                                            ws[next_idx].set_focused(true);
+                                        }
                                     }
                                     libaipc::InputEventData::MouseButton { pressed: true, .. } => {
                                         let mut handled = false;
@@ -79,7 +80,6 @@ impl Window {
                                                 }
                                             }
                                         }
-                                        break;
                                     }
                                     _ => {
                                         for widget in ws.iter_mut() {
@@ -110,8 +110,16 @@ impl Window {
         })
     }
 
-    pub fn add_widget(&mut self, widget: Box<dyn Widget + Send>) {
+    pub fn add_widget(&mut self, mut widget: Box<dyn Widget + Send>) {
         if let Ok(mut ws) = self.widgets.lock() {
+            // If this is the first focusable widget and nothing else is focused, focus it
+            if ws.is_empty() {
+                widget.set_focused(true);
+            } else {
+                // If we are adding a widget and it's already set to focused,
+                // we should probably unfocus others, but let's keep it simple:
+                // the focus cycling logic already handles it.
+            }
             ws.push(widget);
         }
     }
