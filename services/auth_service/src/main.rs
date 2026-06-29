@@ -16,10 +16,17 @@ use std::io::{self, Read, Write};
 use std::path::Path;
 use uuid::Uuid;
 
-const AUTH_DB_PATH: &str = "/root/auth/users.db";
 const AUTH_SOCKET_PATH: &str = paths::AUTH_SOCKET;
 const SESSION_SOCKET_PATH: &str = paths::SESSION_SOCKET;
-const SYSTEM_SECRET_PATH: &str = "/ayux/security/system_secret";
+
+// Centralized path constants for Auth Service
+fn system_secret_path() -> String {
+    format!("{}/system_secret", paths::AYUX_SECURITY)
+}
+
+fn auth_db_path() -> String {
+    format!("{}/auth/users.db", paths::ROOT_ROOT)
+}
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
 struct UserRecord {
@@ -63,24 +70,26 @@ impl AuthService {
     }
 
     fn load_or_generate_secret() -> [u8; 32] {
-        if Path::new(SYSTEM_SECRET_PATH).exists() {
-            let mut file = File::open(SYSTEM_SECRET_PATH).expect("Failed to open system secret");
+        let secret_path = system_secret_path();
+        if Path::new(&secret_path).exists() {
+            let mut file = File::open(&secret_path).expect("Failed to open system secret");
             let mut buf = [0u8; 32];
             file.read_exact(&mut buf).expect("Failed to read system secret");
             buf
         } else {
-            let parent = Path::new(SYSTEM_SECRET_PATH).parent().unwrap();
+            let parent = Path::new(&secret_path).parent().unwrap();
             fs::create_dir_all(parent).expect("Failed to create security dir");
             let secret = generate_random_bytes(32);
-            let mut file = File::create(SYSTEM_SECRET_PATH).expect("Failed to create system secret");
+            let mut file = File::create(&secret_path).expect("Failed to create system secret");
             file.write_all(&secret).expect("Failed to write system secret");
             secret.try_into().unwrap()
         }
     }
 
     fn load_db(&mut self) {
-        if Path::new(AUTH_DB_PATH).exists() {
-            match File::open(AUTH_DB_PATH) {
+        let db_path = auth_db_path();
+        if Path::new(&db_path).exists() {
+            match File::open(&db_path) {
                 Ok(mut file) => {
                     let mut content = String::new();
                     if let Ok(_size) = file.read_to_string(&mut content) {
@@ -143,7 +152,8 @@ impl AuthService {
     }
 
     fn save_db(&self) {
-        if let Some(parent) = Path::new(AUTH_DB_PATH).parent()
+        let db_path = auth_db_path();
+        if let Some(parent) = Path::new(&db_path).parent()
             && let Err(e) = fs::create_dir_all(parent)
         {
             ayux_log(
@@ -166,7 +176,7 @@ impl AuthService {
             }
         };
 
-        match File::create(AUTH_DB_PATH) {
+        match File::create(&db_path) {
             Ok(mut file) => {
                 if let Err(e) = file.write_all(content.as_bytes()) {
                     ayux_log(

@@ -2,10 +2,8 @@ use libaipc::{
     AipcClient, AipcMessage, AuthRequest, AuthResponse, LogLevel, SessionRequest, SessionResponse,
 };
 use libayux::ayux_log;
+use libayux::paths;
 use std::io;
-
-const AUTH_SOCKET_PATH: &str = "/run/auth.sock";
-const SESSION_SOCKET_PATH: &str = "/run/session.sock";
 
 fn main() {
     libayux::setup_env();
@@ -66,7 +64,7 @@ fn main() {
 }
 
 fn get_user_count() -> Result<usize, String> {
-    let mut client = AipcClient::connect(AUTH_SOCKET_PATH).map_err(|e| e.to_string())?;
+    let mut client = AipcClient::connect(paths::AUTH_SOCKET).map_err(|e| e.to_string())?;
 
     let res = client
         .request(
@@ -154,7 +152,7 @@ fn create_user(
     role: &str,
     session_token: Option<String>,
 ) -> Result<(), String> {
-    let mut client = AipcClient::connect(AUTH_SOCKET_PATH).map_err(|e| e.to_string())?;
+    let mut client = AipcClient::connect(paths::AUTH_SOCKET).map_err(|e| e.to_string())?;
 
     let res = client
         .request(
@@ -180,7 +178,7 @@ fn authenticate(
     username: &str,
     password: &str,
 ) -> Result<(String, String, String, String, Vec<String>), String> {
-    let mut client = AipcClient::connect(AUTH_SOCKET_PATH).map_err(|e| e.to_string())?;
+    let mut client = AipcClient::connect(paths::AUTH_SOCKET).map_err(|e| e.to_string())?;
 
     let res = client
         .request(
@@ -213,7 +211,7 @@ fn create_session(
     role: String,
     capabilities: Vec<String>,
 ) -> Result<String, String> {
-    let mut client = AipcClient::connect(SESSION_SOCKET_PATH).map_err(|e| e.to_string())?;
+    let mut client = AipcClient::connect(paths::SESSION_SOCKET).map_err(|e| e.to_string())?;
 
     let res = client
         .request(
@@ -239,7 +237,7 @@ fn create_session(
 fn wait_for_session(token: &str) {
     loop {
         std::thread::sleep(std::time::Duration::from_secs(1));
-        let mut client = match AipcClient::connect(SESSION_SOCKET_PATH) {
+        let mut client = match AipcClient::connect(paths::SESSION_SOCKET) {
             Ok(c) => c,
             Err(_) => break,
         };

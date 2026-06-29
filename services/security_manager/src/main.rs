@@ -134,14 +134,16 @@ impl SecurityManager {
         }
 
         // Other system directories
-        if path.starts_with("/tmp")
+        if path.starts_with(paths::AYUX_TMP)
+            || path.starts_with(paths::AYUX_RUNTIME)
             || path.starts_with("/bin")
             || path.starts_with("/usr")
             || path.starts_with("/etc")
-            || path.starts_with("/run")
             || path.starts_with("/proc")
             || path.starts_with("/sys")
             || path.starts_with("/dev")
+            || path.starts_with("/run")
+            || path.starts_with("/tmp")
         {
             return true;
         }
