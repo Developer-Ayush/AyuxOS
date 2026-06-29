@@ -3,13 +3,14 @@ use libaipc::{
     AIPC_VERSION, AipcClient, AipcEnvelope, AipcHeader, AipcMessage, MessageType, SecurityRequest,
     SecurityResponse, SessionRequest, SessionResponse, create_listener,
 };
+use libayux::paths;
 use serde::{Deserialize, Serialize};
 use std::fs::{self, File};
 use std::io;
 use std::sync::atomic::{AtomicBool, Ordering};
 
-const SECURITY_SOCKET_PATH: &str = "/run/security.sock";
-const SESSION_SOCKET_PATH: &str = "/run/session.sock";
+const SECURITY_SOCKET_PATH: &str = paths::SECURITY_SOCKET;
+const SESSION_SOCKET_PATH: &str = paths::SESSION_SOCKET;
 
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq, Hash)]
 pub enum Capability {
@@ -92,7 +93,7 @@ impl SecurityManager {
         }
 
         // Standard path-based restrictions
-        let user_home = format!("/users/{}", internal_id);
+        let user_home = paths::user_home(internal_id);
 
         // Block path traversal
         if path.contains("..") {
@@ -100,10 +101,10 @@ impl SecurityManager {
         }
 
         // /ayux is immutable and protected
-        if path.starts_with("/ayux") {
+        if path.starts_with(paths::AYUX_ROOT) {
             // The system secret is strictly off-limits to everyone except internal service use
             // (AuthService reads it directly from disk, not via AIPC)
-            if path == "/ayux/security/system_secret" {
+            if path == format!("{}/system_secret", paths::AYUX_SECURITY) {
                 return false;
             }
 
@@ -114,16 +115,17 @@ impl SecurityManager {
             // Reading from /ayux is allowed for system processes or admin?
             // The requirement says "Hidden from normal file browsing".
             // For now, allow read for admin and internal use.
-            return self.has_capability(capabilities, "Admin") || path.starts_with("/ayux/lib");
+            return self.has_capability(capabilities, "Admin")
+                || path.starts_with(paths::AYUX_LIBRARIES);
         }
 
         // /root is administrator workspace
-        if path.starts_with("/root") {
+        if path.starts_with(paths::ROOT_ROOT) {
             return role == "Administrator";
         }
 
         // /users/ access rules
-        if path.starts_with("/users/") {
+        if path.starts_with(paths::USERS_ROOT) {
             if path.starts_with(&user_home) {
                 return true;
             }

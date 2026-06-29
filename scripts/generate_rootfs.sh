@@ -34,6 +34,25 @@ mkdir -p \
     usr/sbin \
     dev/input \
     dev/shm \
+    ayux/apps \
+    ayux/system \
+    ayux/services \
+    ayux/security \
+    ayux/config \
+    ayux/runtime \
+    ayux/themes \
+    ayux/cache \
+    ayux/logs \
+    ayux/updates \
+    ayux/fonts \
+    ayux/icons \
+    ayux/certificates \
+    ayux/libraries \
+    ayux/manifests \
+    ayux/native \
+    ayux/media \
+    ayux/devices \
+    ayux/tmp \
     ayux/assets
 
 for BIN in \
@@ -57,73 +76,95 @@ do
 done
 
 install -m 755 "${TARGET_DIR}/ayux_init" ./init
-install -m 755 "${TARGET_DIR}/login_manager" ./bin/
-install -m 755 "${TARGET_DIR}/ayux_shell" ./bin/
-install -m 755 "${TARGET_DIR}/auth_service" ./bin/
-install -m 755 "${TARGET_DIR}/session_manager" ./bin/
-install -m 755 "${TARGET_DIR}/security_manager" ./bin/
-install -m 755 "${TARGET_DIR}/log_service" ./bin/
-install -m 755 "${TARGET_DIR}/network_manager" ./bin/
-install -m 755 "${TARGET_DIR}/window_server" ./bin/
-install -m 755 "${TARGET_DIR}/login_manager_gui" ./bin/
-install -m 755 "${TARGET_DIR}/desktop" ./bin/
-install -m 755 "${TARGET_DIR}/terminal_emulator" ./bin/
+
+# Core OS Services
+install -m 755 "${TARGET_DIR}/log_service" ./ayux/services/
+install -m 755 "${TARGET_DIR}/auth_service" ./ayux/services/
+install -m 755 "${TARGET_DIR}/session_manager" ./ayux/services/
+install -m 755 "${TARGET_DIR}/security_manager" ./ayux/services/
+install -m 755 "${TARGET_DIR}/network_manager" ./ayux/services/
+install -m 755 "${TARGET_DIR}/window_server" ./ayux/services/
+
+# Native Applications
+install -m 755 "${TARGET_DIR}/login_manager_gui" ./ayux/apps/
+install -m 755 "${TARGET_DIR}/desktop" ./ayux/apps/
+install -m 755 "${TARGET_DIR}/terminal_emulator" ./ayux/apps/
+install -m 755 "${TARGET_DIR}/ayux_shell" ./ayux/apps/
+# login_manager (CLI) - keeping it for now, but move it
+install -m 755 "${TARGET_DIR}/login_manager" ./ayux/apps/
+
+# Legacy/Compatibility symlinks (optional, but might help existing code before refactor)
+ln -sf /ayux/services/log_service ./bin/log_service
+ln -sf /ayux/services/auth_service ./bin/auth_service
+ln -sf /ayux/services/session_manager ./bin/session_manager
+ln -sf /ayux/services/security_manager ./bin/security_manager
+ln -sf /ayux/services/network_manager ./bin/network_manager
+ln -sf /ayux/services/window_server ./bin/window_server
+ln -sf /ayux/apps/login_manager_gui ./bin/login_manager_gui
+ln -sf /ayux/apps/desktop ./bin/desktop
+ln -sf /ayux/apps/terminal_emulator ./bin/terminal_emulator
+ln -sf /ayux/apps/ayux_shell ./bin/ayux_shell
+ln -sf /ayux/apps/login_manager ./bin/login_manager
 
 if [ -f "${REPO_ROOT}/ayux_assets/default.ttf" ]; then
     cp "${REPO_ROOT}/ayux_assets/default.ttf" ./ayux/assets/
+    cp "${REPO_ROOT}/ayux_assets/default.ttf" ./ayux/fonts/
 fi
 
 cat > etc/passwd <<EOF
-root:x:0:0:root:/root:/bin/ayux_shell
+root:x:0:0:root:/root:/ayux/apps/ayux_shell
 EOF
 
 cat > etc/motd <<EOF
 Welcome to AyuxOS Milestone 4 - Graphics Stack & UI Foundation
 EOF
 
-cat > etc/ayux_services.toml <<EOF
+cat > ayux/config/services.toml <<EOF
 [services.log_service]
-path = "/bin/log_service"
+path = "/ayux/services/log_service"
 dependencies = []
 restart_policy = "always"
 priority = 1
-health_check_socket = "/run/log.sock"
+health_check_socket = "/ayux/runtime/log.sock"
 
 [services.auth_service]
-path = "/bin/auth_service"
+path = "/ayux/services/auth_service"
 dependencies = ["log_service"]
 restart_policy = "always"
 priority = 2
-health_check_socket = "/run/auth.sock"
+health_check_socket = "/ayux/runtime/auth.sock"
 
 [services.session_manager]
-path = "/bin/session_manager"
+path = "/ayux/services/session_manager"
 dependencies = ["log_service"]
 restart_policy = "always"
 priority = 2
-health_check_socket = "/run/session.sock"
+health_check_socket = "/ayux/runtime/session.sock"
 
 [services.security_manager]
-path = "/bin/security_manager"
+path = "/ayux/services/security_manager"
 dependencies = ["session_manager", "log_service"]
 restart_policy = "always"
 priority = 3
-health_check_socket = "/run/security.sock"
+health_check_socket = "/ayux/runtime/security.sock"
 
 [services.network_manager]
-path = "/bin/network_manager"
+path = "/ayux/services/network_manager"
 dependencies = ["log_service"]
 restart_policy = "always"
 priority = 3
-health_check_socket = "/run/network.sock"
+health_check_socket = "/ayux/runtime/network.sock"
 
 [services.window_server]
-path = "/bin/window_server"
+path = "/ayux/services/window_server"
 dependencies = ["log_service"]
 restart_policy = "always"
 priority = 4
-health_check_socket = "/run/window_server.sock"
+health_check_socket = "/ayux/runtime/window_server.sock"
 EOF
+
+# Legacy/Compatibility link
+ln -sf /ayux/config/services.toml etc/ayux_services.toml
 
 echo "Packing initramfs..."
 find . -print0 \

@@ -1,5 +1,6 @@
 use libui::{Window, widgets::{Terminal}};
 use libgraphics::Rect;
+use libayux::paths;
 use std::thread;
 use std::time::Duration;
 use std::process::{Command};
@@ -71,7 +72,7 @@ fn main() {
             }
         }
         nix::unistd::ForkResult::Child => {
-            let _ = Command::new("/bin/ayux_shell").status();
+            let _ = Command::new(paths::app_executable("ayux_shell")).status();
             std::process::exit(0);
         }
     }

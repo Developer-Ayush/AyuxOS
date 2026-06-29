@@ -1,5 +1,6 @@
 use libui::{Window, widgets::{Panel, Button}};
 use libgraphics::Rect;
+use libayux::paths;
 use std::thread;
 use std::time::Duration;
 use std::process::Command;
@@ -24,7 +25,7 @@ fn main() {
         rect: Rect::new(10, 733, 100, 30),
         pressed: false,
         on_click: Some(Box::new(|| {
-            Command::new("/bin/terminal_emulator").spawn().ok();
+            Command::new(paths::app_executable("terminal_emulator")).spawn().ok();
         })),
     }));
 

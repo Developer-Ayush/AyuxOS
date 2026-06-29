@@ -2,12 +2,13 @@ use libaipc::{
     AIPC_VERSION, AipcClient, AipcEnvelope, AipcHeader, AipcMessage, HalRequest, HalResponse,
     MessageType, NetworkRequest, NetworkResponse, create_listener,
 };
+use libayux::paths;
 use libayux_hal::discovery::{Discovery, LinuxDiscovery};
 use std::fs;
 use std::io::{self};
 use std::process::Command;
 
-const NETWORK_SOCKET_PATH: &str = "/run/network.sock";
+const NETWORK_SOCKET_PATH: &str = paths::NETWORK_SOCKET;
 
 struct NetworkManager {}
 

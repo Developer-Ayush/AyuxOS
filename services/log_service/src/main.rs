@@ -2,6 +2,7 @@ use libaipc::{
     AIPC_VERSION, AipcClient, AipcEnvelope, AipcHeader, AipcMessage, LogLevel, LogRequest,
     LogResponse, MessageType, create_listener,
 };
+use libayux::paths;
 use std::collections::HashMap;
 use std::fs::{self, OpenOptions};
 use std::io::{self, BufRead, BufReader, Write};
@@ -10,9 +11,9 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-const LOG_SOCKET_PATH: &str = "/run/log.sock";
+const LOG_SOCKET_PATH: &str = paths::LOG_SOCKET;
 const KMSG_PATH: &str = "/proc/kmsg";
-const LOG_DIR: &str = "/var/log";
+const LOG_DIR: &str = paths::AYUX_LOGS;
 const MAX_LOG_SIZE: u64 = 5 * 1024 * 1024; // 5 MB
 const MAX_ROTATED_FILES: usize = 5;
 

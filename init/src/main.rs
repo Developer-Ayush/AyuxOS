@@ -1,4 +1,5 @@
 use serde::Deserialize;
+use libayux::paths;
 use std::collections::HashMap;
 use std::fs;
 use std::io::{self, Write};
@@ -38,52 +39,65 @@ fn main() {
 
     libayux::setup_env();
 
-    let config_path = "/etc/ayux_services.toml";
-    let config_str = fs::read_to_string(config_path).unwrap_or_else(|_| {
-        r#"
+    let config_path = format!("{}/services.toml", paths::AYUX_CONFIG);
+    let config_str = fs::read_to_string(&config_path).unwrap_or_else(|_| {
+        format!(
+            r#"
         [services.log_service]
-        path = "/bin/log_service"
+        path = "{}/log_service"
         dependencies = []
         restart_policy = "always"
         priority = 1
-        health_check_socket = "/run/log.sock"
+        health_check_socket = "{}"
 
         [services.auth_service]
-        path = "/bin/auth_service"
+        path = "{}/auth_service"
         dependencies = ["log_service"]
         restart_policy = "always"
         priority = 2
-        health_check_socket = "/run/auth.sock"
+        health_check_socket = "{}"
 
         [services.session_manager]
-        path = "/bin/session_manager"
+        path = "{}/session_manager"
         dependencies = ["log_service"]
         restart_policy = "always"
         priority = 2
-        health_check_socket = "/run/session.sock"
+        health_check_socket = "{}"
 
         [services.security_manager]
-        path = "/bin/security_manager"
+        path = "{}/security_manager"
         dependencies = ["session_manager", "log_service"]
         restart_policy = "always"
         priority = 3
-        health_check_socket = "/run/security.sock"
+        health_check_socket = "{}"
 
         [services.network_manager]
-        path = "/bin/network_manager"
+        path = "{}/network_manager"
         dependencies = ["log_service"]
         restart_policy = "always"
         priority = 3
-        health_check_socket = "/run/network.sock"
+        health_check_socket = "{}"
 
         [services.window_server]
-        path = "/bin/window_server"
+        path = "{}/window_server"
         dependencies = ["log_service"]
         restart_policy = "always"
         priority = 4
-        health_check_socket = "/run/window_server.sock"
-        "#
-        .to_string()
+        health_check_socket = "{}"
+        "#,
+            paths::AYUX_SERVICES,
+            paths::LOG_SOCKET,
+            paths::AYUX_SERVICES,
+            paths::AUTH_SOCKET,
+            paths::AYUX_SERVICES,
+            paths::SESSION_SOCKET,
+            paths::AYUX_SERVICES,
+            paths::SECURITY_SOCKET,
+            paths::AYUX_SERVICES,
+            paths::NETWORK_SOCKET,
+            paths::AYUX_SERVICES,
+            paths::WINDOW_SERVER_SOCKET
+        )
     });
 
     let config: Config = toml::from_str(&config_str).expect("Failed to parse service config");
@@ -187,7 +201,7 @@ fn main() {
         };
 
         if login_manager_needs_start {
-            match Command::new("/bin/login_manager_gui").spawn() {
+            match Command::new(paths::app_executable("login_manager_gui")).spawn() {
                 Ok(child) => {
                     if login_manager.is_none() {
                         println!("OK");

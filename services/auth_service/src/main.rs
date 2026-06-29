@@ -7,6 +7,7 @@ use libaipc::{
     AIPC_VERSION, AipcClient, AipcEnvelope, AipcHeader, AipcMessage, AuthRequest, AuthResponse,
     MessageType, create_listener,
 };
+use libayux::paths;
 use libayux::{ayux_log, generate_random_bytes, hmac_sha256};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -16,8 +17,8 @@ use std::path::Path;
 use uuid::Uuid;
 
 const AUTH_DB_PATH: &str = "/root/auth/users.db";
-const AUTH_SOCKET_PATH: &str = "/run/auth.sock";
-const SESSION_SOCKET_PATH: &str = "/run/session.sock";
+const AUTH_SOCKET_PATH: &str = paths::AUTH_SOCKET;
+const SESSION_SOCKET_PATH: &str = paths::SESSION_SOCKET;
 const SYSTEM_SECRET_PATH: &str = "/ayux/security/system_secret";
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -127,8 +128,8 @@ impl AuthService {
             };
 
             // Migrate home directory
-            let old_home = format!("/users/{}", username);
-            let new_home = format!("/users/{}", internal_id);
+            let old_home = format!("{}/{}", paths::USERS_ROOT, username);
+            let new_home = paths::user_home(&internal_id);
             if Path::new(&old_home).exists() {
                 if let Err(e) = fs::rename(&old_home, &new_home) {
                     ayux_log(LogLevel::Error, "auth_service", &format!("Failed to migrate home dir for {}: {}", username, e));
@@ -327,7 +328,7 @@ impl AuthService {
                     state: "active".to_string(),
                 };
 
-                let home_dir = format!("/users/{}", internal_id);
+                let home_dir = paths::user_home(&internal_id);
                 if let Err(e) = self.create_home_dir(&home_dir) {
                     return AuthResponse::Error(format!("Failed to create home directory: {}", e));
                 }
@@ -410,7 +411,7 @@ impl AuthService {
 
                     if Argon2::default().verify_password(password.as_bytes(), &parsed_hash).is_ok() {
                         // DELETE DATA
-                        let home_dir = format!("/users/{}", internal_id);
+                        let home_dir = paths::user_home(&internal_id);
                         if let Err(e) = fs::remove_dir_all(&home_dir) {
                             ayux_log(LogLevel::Error, "auth_service", &format!("Failed to delete home dir: {}", e));
                         }

@@ -1,11 +1,12 @@
 use libaipc::{AipcClient, AipcMessage, AuthRequest, AuthResponse, LogLevel, SecurityRequest, SecurityResponse};
 use libayux::ayux_log;
+use libayux::paths;
 use std::env;
 use std::io::{self, Write};
 
-const AUTH_SOCKET_PATH: &str = "/run/auth.sock";
-const SECURITY_SOCKET_PATH: &str = "/run/security.sock";
-const SESSION_SOCKET_PATH: &str = "/run/session.sock";
+const AUTH_SOCKET_PATH: &str = paths::AUTH_SOCKET;
+const SECURITY_SOCKET_PATH: &str = paths::SECURITY_SOCKET;
+const SESSION_SOCKET_PATH: &str = paths::SESSION_SOCKET;
 
 struct Shell {
     username: String,
@@ -23,9 +24,9 @@ impl Shell {
         let internal_id = env::var("AYUX_INTERNAL_ID").unwrap_or_else(|_| "unknown".to_string());
         let token = env::var("AYUX_SESSION_TOKEN").unwrap_or_else(|_| "none".to_string());
         let cwd = if username == "root" {
-            "/root".to_string()
+            paths::ROOT_ROOT.to_string()
         } else {
-            format!("/users/{}", internal_id)
+            paths::user_home(&internal_id)
         };
 
         Self {
@@ -207,9 +208,9 @@ impl Shell {
     fn cd(&mut self, path: &str) {
         if path.is_empty() {
             self.cwd = if self.username == "root" {
-                "/root".to_string()
+                paths::ROOT_ROOT.to_string()
             } else {
-                format!("/users/{}", self.internal_id)
+                paths::user_home(&self.internal_id)
             };
             return;
         }

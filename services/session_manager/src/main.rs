@@ -2,6 +2,7 @@ use libaipc::{
     AIPC_VERSION, AipcClient, AipcEnvelope, AipcHeader, AipcMessage, MessageType, SessionRequest,
     SessionResponse, create_listener,
 };
+use libayux::paths;
 use nix::sys::signal::{self, Signal};
 use nix::unistd::Pid;
 use std::collections::HashMap;
@@ -11,7 +12,7 @@ use std::thread;
 use std::time::Duration;
 use uuid::Uuid;
 
-const SESSION_SOCKET_PATH: &str = "/run/session.sock";
+const SESSION_SOCKET_PATH: &str = paths::SESSION_SOCKET;
 
 struct Session {
     #[allow(dead_code)]
@@ -76,7 +77,7 @@ impl SessionManager {
         let internal_id = internal_id.to_string();
 
         unsafe {
-            let child = Command::new("/bin/ayux_shell")
+            let child = Command::new(paths::app_executable("ayux_shell"))
                 .env("USER", &username)
                 .env("DISPLAY_NAME", &display_name)
                 .env("AYUX_INTERNAL_ID", &internal_id)

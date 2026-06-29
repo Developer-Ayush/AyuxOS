@@ -1,5 +1,6 @@
 use libui::{Window, widgets::{Button, Label, Panel, TextBox, PasswordBox}};
 use libgraphics::{Rect};
+use libayux::paths;
 use std::thread;
 use std::time::Duration;
 use libaipc::{AipcClient, AipcMessage, AuthRequest, AuthResponse, SessionRequest, SessionResponse};
@@ -56,7 +57,7 @@ fn main() {
             let username = user_input_clone.lock().unwrap().clone();
             let password = pass_input_clone.lock().unwrap().clone();
 
-            if let Ok(mut client) = AipcClient::connect("/run/auth.sock") {
+            if let Ok(mut client) = AipcClient::connect(paths::AUTH_SOCKET) {
                 let resp = client.request("login_manager_gui", None, AipcMessage::Auth(AuthRequest::Login {
                     username: username.clone(),
                     password,
@@ -65,7 +66,7 @@ fn main() {
                 match resp {
                     Ok(AipcMessage::AuthRes(AuthResponse::Authenticated { internal_id, username, display_name, role, capabilities })) => {
                         // Success! Create session
-                        if let Ok(mut s_client) = AipcClient::connect("/run/session.sock") {
+                        if let Ok(mut s_client) = AipcClient::connect(paths::SESSION_SOCKET) {
                             let s_resp = s_client.request("login_manager_gui", None, AipcMessage::Session(SessionRequest::CreateSession {
                                 internal_id, username, display_name, role, capabilities
                             }));
@@ -92,7 +93,7 @@ fn main() {
         let status = *login_status.lock().unwrap();
         if status == Some(true) {
             println!("Login successful! Launching desktop...");
-            Command::new("/bin/desktop").spawn().ok();
+            Command::new(paths::app_executable("desktop")).spawn().ok();
             break;
         } else if status == Some(false) {
             // Display error?

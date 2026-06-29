@@ -32,7 +32,14 @@ AyuxOS uses a modern, modular rendering pipeline:
 5. **Graphics HAL**: Provides access to the physical framebuffer device.
 
 ## 4. Security Model
-The security model remains focused on tri-level hierarchy: `/ayux` (Immutable OS), `/root` (Isolated Admin), and `/users` (User Data). Window isolation is enforced by the Window Server, ensuring applications can only access their own surfaces.
+The security model focuses on a tri-level hierarchy:
+- **`/ayux`**: Immutable Operating System. Contains all OS binaries, services, and shared resources.
+- **`/root`**: Isolated Administrator workspace.
+- **`/users`**: User Data and Profiles. Each user is isolated in their own UUID-based directory.
+
+For more details on the filesystem layout, see [FILESYSTEM.md](FILESYSTEM.md).
+
+Window isolation is enforced by the Window Server, ensuring applications can only access their own surfaces.
 
 ## 5. Subsystems
 
